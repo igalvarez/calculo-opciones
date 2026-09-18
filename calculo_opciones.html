@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calculadora Opciones</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+    margin: 0;
+  }
+
+  .card {
+    background: #161b22;
+    border: none;
+    border-radius: 0;
+    padding: 24px 32px;
+    width: 100%;
+    min-height: 100vh;
+  }
+
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #21262d;
+  }
+
+  h1 { font-size: 18px; font-weight: 600; color: #e6edf3; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 1px 1fr;
+    gap: 0 16px;
+    align-items: start;
+  }
+
+  .divider-v { background: #21262d; width: 1px; align-self: stretch; }
+
+  .section-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    margin-bottom: 10px;
+  }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  label  { font-size: 13px; color: #8b949e; }
+
+  input, select {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #e6edf3;
+    font-size: 18px;
+    font-weight: 600;
+    padding: 10px 12px;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  select { cursor: pointer; }
+  select option { background: #161b22; color: #e6edf3; font-weight: 600; }
+
+  input:focus, select:focus { border-color: #58a6ff; }
+  input.ask-ok   { border-color: #238636; }
+  input.ask-warn { border-color: #da3633; background: #1a0a0a; }
+
+  .ask-hint { font-size: 13px; min-height: 18px; }
+  .ask-hint.ok   { color: #3fb950; }
+  .ask-hint.warn { color: #f85149; }
+
+  .sep-h { border: none; border-top: 1px solid #21262d; margin: 16px 0; }
+
+  .range-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    font-size: 14px;
+    color: #8b949e;
+  }
+  .range-display .val { color: #f0a030; font-weight: 700; font-size: 16px; }
+
+  .plan-toggle { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+  .plan-btn {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #8b949e;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 10px;
+    text-align: center;
+    transition: all 0.15s;
+  }
+
+  .plan-btn.active      { background: #1f3a5f; border-color: #58a6ff; color: #58a6ff; }
+  .plan-btn.p100.active { background: #2d1f5f; border-color: #a371f7; color: #a371f7; }
+
+  .results { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+
+  .result-box {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 20px 10px;
+    text-align: center;
+    transition: border-color 0.3s;
+  }
+
+  .result-label { font-size: 13px; color: #8b949e; margin-bottom: 8px; }
+  .result-value { font-size: 32px; font-weight: 700; color: #e6edf3; }
+  .result-value.hi { color: #f0a030; }
+  .result-value.pu { color: #a371f7; }
+  .result-box.green { border-color: #238636; }
+  .result-box.red   { border-color: #da3633; }
+
+  .saldo-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-radius: 8px;
+    padding: 16px 20px;
+    border: 1px solid;
+    transition: all 0.3s;
+  }
+
+  .saldo-row.ok   { background: #0d2818; border-color: #238636; }
+  .saldo-row.warn { background: #2d1212; border-color: #da3633; }
+
+  .saldo-status { font-size: 16px; font-weight: 600; }
+  .saldo-row.ok   .saldo-status { color: #3fb950; }
+  .saldo-row.warn .saldo-status { color: #f85149; }
+  .saldo-detail { font-size: 13px; color: #8b949e; margin-top: 4px; }
+  .saldo-right  { font-size: 28px; font-weight: 700; color: #e6edf3; white-space: nowrap; margin-left: 8px; }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <div class="header">
+    <h1>📊 Calculadora de Opciones</h1>
+    <span style="font-size:10px;color:#484f58;">Simulada · educativo</span>
+  </div>
+
+  <div class="layout">
+
+    <!-- IZQUIERDA -->
+    <div>
+      <div class="section-label">Ticker</div>
+      <div class="field" style="margin-bottom:7px;">
+        <select id="ticker-select" onchange="onTickerChange()">
+          <option value="">— Selecciona un ticker —</option>
+        </select>
+      </div>
+
+      <div class="range-display" id="range-display" style="display:none;">
+        <span>Rango óptimo:</span>
+        <span class="val" id="range-opt">—</span>
+      </div>
+
+      <hr class="sep-h">
+      <div class="section-label">Operación</div>
+
+      <div class="grid2" style="margin-bottom:8px;">
+        <div class="field">
+          <label>Monto inicial ($)</label>
+          <input type="number" id="monto" placeholder="800" value="800">
+        </div>
+        <div class="field">
+          <label>Contratos</label>
+          <input type="number" id="contratos" placeholder="1" min="1" value="1">
+        </div>
+        <div class="field">
+          <label>ASK (prima)</label>
+          <input type="number" id="ask" placeholder="1.24" step="0.01">
+          <div class="ask-hint" id="ask-hint"></div>
+        </div>
+        <div class="field">
+          <label>Plus ($)</label>
+          <input type="number" id="plus" placeholder="2" value="2" step="1" min="0">
+        </div>
+      </div>
+
+      <div class="section-label">Plan</div>
+      <div class="plan-toggle">
+        <div class="plan-btn active" id="btn10"  onclick="setPlan(10)">10%</div>
+        <div class="plan-btn"        id="btn35"  onclick="setPlan(35)">35%</div>
+        <div class="plan-btn p100"   id="btn100" onclick="setPlan(100)">100%</div>
+      </div>
+    </div>
+
+    <!-- DIVISOR -->
+    <div class="divider-v"></div>
+
+    <!-- DERECHA -->
+    <div>
+      <div class="section-label">Resultados</div>
+      <div class="results">
+        <div class="result-box">
+          <div class="result-label">LIMIT</div>
+          <div class="result-value hi" id="res-limit">—</div>
+        </div>
+        <div class="result-box" id="box-coste">
+          <div class="result-label">Coste</div>
+          <div class="result-value" id="res-coste">—</div>
+        </div>
+        <div class="result-box">
+          <div class="result-label">Beneficio</div>
+          <div class="result-value" id="res-beneficio">—</div>
+        </div>
+      </div>
+
+      <div class="saldo-row ok" id="saldo-box" style="margin-top:8px;">
+        <div>
+          <div class="saldo-status" id="saldo-status">Selecciona un ticker</div>
+          <div class="saldo-detail" id="saldo-detail">—</div>
+        </div>
+        <div class="saldo-right" id="res-saldo">—</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const TICKERS = [
+  { t:"AMZN", opt:"$65 - $130",   min:65,  max:130,  name:"Amazon" },
+  { t:"AAPL", opt:"$45 - $95",    min:45,  max:95,   name:"Apple" },
+  { t:"GOOG", opt:"$60 - $140",   min:60,  max:140,  name:"Alphabet" },
+  { t:"META", opt:"$50 - $170",   min:50,  max:170,  name:"Meta" },
+  { t:"MSFT", opt:"$70 - $155",   min:70,  max:155,  name:"Microsoft" },
+  { t:"NFLX", opt:"$55 - $85",    min:55,  max:85,   name:"Netflix" },
+  { t:"TSLA", opt:"$80 - $160",   min:80,  max:160,  name:"Tesla" },
+  { t:"PLTR", opt:"$160 - $350",  min:160, max:350,  name:"Palantir" },
+  { t:"ORCL", opt:"$150 - $260",  min:150, max:260,  name:"Oracle" },
+  { t:"AMD",  opt:"$65 - $140",   min:65,  max:140,  name:"AMD" },
+  { t:"MU",   opt:"$85 - $140",   min:85,  max:140,  name:"Micron" },
+  { t:"NVDA", opt:"$80 - $170",   min:80,  max:170,  name:"NVIDIA" },
+  { t:"QCOM", opt:"$90 - $160",   min:90,  max:160,  name:"Qualcomm" },
+  { t:"AVGO", opt:"$90 - $140",   min:90,  max:140,  name:"Broadcom" },
+  { t:"SOXL", opt:"$100 - $200",  min:100, max:200,  name:"SOXL" },
+  { t:"DASH", opt:"$40 - $130",   min:40,  max:130,  name:"DoorDash" },
+  { t:"LYFT", opt:"$25 - $50",    min:25,  max:50,   name:"Lyft" },
+  { t:"UBER", opt:"$35 - $60",    min:35,  max:60,   name:"Uber" },
+  { t:"HD",   opt:"$160 - $250",  min:160, max:250,  name:"Home Depot" },
+  { t:"LOW",  opt:"$75 - $150",   min:75,  max:150,  name:"Lowe's" },
+  { t:"WMT",  opt:"$60 - $110",   min:60,  max:110,  name:"Walmart" },
+  { t:"DIA",  opt:"$130 - $220",  min:130, max:220,  name:"DIA ETF" },
+  { t:"QQQ",  opt:"$30 - $60",    min:30,  max:60,   name:"QQQ ETF" },
+  { t:"SPY",  opt:"$30 - $45",    min:30,  max:45,   name:"SPY ETF" },
+  { t:"SPX",  opt:"$380 - $550",  min:380, max:550,  name:"SPX" },
+  { t:"IWM",  opt:"$40 - $70",    min:40,  max:70,   name:"IWM ETF" },
+  { t:"TNA",  opt:"$20 - $60",    min:20,  max:60,   name:"TNA ETF" },
+  { t:"AXP",  opt:"$100 - $240",  min:100, max:240,  name:"Amex" },
+  { t:"C",    opt:"$40 - $70",    min:40,  max:70,   name:"Citigroup" },
+  { t:"MA",   opt:"$100 - $175",  min:100, max:175,  name:"Mastercard" },
+  { t:"PYPL", opt:"$30 - $60",    min:30,  max:60,   name:"PayPal" },
+  { t:"V",    opt:"$75 - $180",   min:75,  max:180,  name:"Visa" },
+  { t:"BABA", opt:"$40 - $80",    min:40,  max:80,   name:"Alibaba" },
+  { t:"LI",   opt:"$30 - $60",    min:30,  max:60,   name:"Li Auto" },
+  { t:"NIO",  opt:"$30 - $75",    min:30,  max:75,   name:"NIO" },
+  { t:"XPEV", opt:"$60 - $100",   min:60,  max:100,  name:"XPeng" },
+  { t:"GLD",  opt:"$60 - $120",   min:60,  max:120,  name:"GLD" },
+  { t:"SLV",  opt:"$60 - $75",    min:60,  max:75,   name:"SLV" },
+  { t:"USO",  opt:"$50 - $100",   min:50,  max:100,  name:"USO" },
+  { t:"COIN", opt:"$100 - $150",  min:100, max:150,  name:"Coinbase" },
+  { t:"HOOD", opt:"$60 - $90",    min:60,  max:90,   name:"Robinhood" },
+  { t:"CVS",  opt:"$75 - $135",   min:75,  max:135,  name:"CVS" },
+  { t:"MRNA", opt:"$65 - $100",   min:65,  max:100,  name:"Moderna" },
+  { t:"PFE",  opt:"$30 - $70",    min:30,  max:70,   name:"Pfizer" },
+  { t:"BA",   opt:"$55 - $105",   min:55,  max:105,  name:"Boeing" },
+  { t:"URA",  opt:"$55 - $75",    min:55,  max:75,   name:"URA ETF" },
+  { t:"CCL",  opt:"$25 - $45",    min:25,  max:45,   name:"Carnival" },
+  { t:"RCL",  opt:"$80 - $140",   min:80,  max:140,  name:"Royal Caribbean" },
+  { t:"AAL",  opt:"$40 - $80",    min:40,  max:80,   name:"American Airlines" },
+  { t:"DAL",  opt:"$40 - $65",    min:40,  max:65,   name:"Delta" },
+];
+
+let plan = 10;
+let currentMin = 0, currentMax = 9999;
+
+// Poblar el select
+const sel = document.getElementById('ticker-select');
+TICKERS.forEach(tk => {
+  const opt = document.createElement('option');
+  opt.value = tk.t;
+  opt.textContent = tk.t + ' — ' + tk.name + '  (' + tk.opt + ')';
+  sel.appendChild(opt);
+});
+
+function onTickerChange() {
+  const val = sel.value;
+  if (!val) {
+    document.getElementById('range-display').style.display = 'none';
+    currentMin = 0; currentMax = 9999;
+    calcular(); return;
+  }
+  const tk = TICKERS.find(t => t.t === val);
+  if (!tk) return;
+  currentMin = tk.min / 100;
+  currentMax = tk.max / 100;
+  document.getElementById('range-opt').textContent = tk.opt;
+  document.getElementById('range-display').style.display = 'flex';
+  calcular();
+}
+
+function setPlan(p) {
+  plan = p;
+  document.getElementById('btn10').classList.toggle('active', p === 10);
+  document.getElementById('btn35').classList.toggle('active', p === 35);
+  document.getElementById('btn100').classList.toggle('active', p === 100);
+  document.getElementById('res-limit').className = 'result-value ' + (p === 100 ? 'pu' : 'hi');
+  calcular();
+}
+
+function fmt(n) { return '$' + n.toFixed(2); }
+
+function calcular() {
+  const monto     = parseFloat(document.getElementById('monto').value)     || 0;
+  const contratos = parseFloat(document.getElementById('contratos').value) || 0;
+  const ask       = parseFloat(document.getElementById('ask').value);
+  const plus      = parseFloat(document.getElementById('plus').value)      || 0;
+
+  const askInput = document.getElementById('ask');
+  const askHint  = document.getElementById('ask-hint');
+
+  if (!isNaN(ask) && ask > 0) {
+    if (ask >= currentMin && ask <= currentMax) {
+      askInput.className = 'ask-ok';
+      askHint.className  = 'ask-hint ok';
+      askHint.textContent = '✓ en rango';
+    } else {
+      askInput.className = 'ask-warn';
+      askHint.className  = 'ask-hint warn';
+      askHint.textContent = ask < currentMin ? '✗ muy bajo' : '✗ muy alto';
+    }
+  } else {
+    askInput.className  = '';
+    askHint.className   = 'ask-hint';
+    askHint.textContent = '';
+  }
+
+  if (isNaN(ask) || ask <= 0) {
+    ['res-limit','res-coste','res-beneficio','res-saldo'].forEach(id =>
+      document.getElementById(id).textContent = '—');
+    document.getElementById('saldo-status').textContent = 'Introduce el ASK';
+    document.getElementById('saldo-detail').textContent = '—';
+    return;
+  }
+
+  const limit     = Math.round((ask * (1 + plan / 100) + plus / 100) * 100) / 100;
+  const coste     = ask * 100 * contratos;
+  const beneficio = (limit - ask) * 100 * contratos;
+  const saldo     = monto * 0.5 + beneficio;
+
+  document.getElementById('res-limit').textContent     = '$' + limit.toFixed(2);
+  document.getElementById('res-coste').textContent     = fmt(coste);
+  document.getElementById('res-beneficio').textContent = fmt(beneficio);
+  document.getElementById('res-saldo').textContent     = fmt(saldo);
+
+  const box    = document.getElementById('saldo-box');
+  const boxC   = document.getElementById('box-coste');
+  const status = document.getElementById('saldo-status');
+  const detail = document.getElementById('saldo-detail');
+
+  if (coste <= saldo) {
+    box.className  = 'saldo-row ok';
+    boxC.className = 'result-box green';
+    status.textContent = '✅ Saldo suficiente';
+    detail.textContent = fmt(coste) + ' coste vs ' + fmt(saldo) + ' disponible';
+  } else {
+    box.className  = 'saldo-row warn';
+    boxC.className = 'result-box red';
+    status.textContent = '⚠️ Saldo insuficiente';
+    detail.textContent = 'Necesitas ' + fmt(coste) + ' pero tienes ' + fmt(saldo);
+  }
+}
+
+document.querySelectorAll('input').forEach(el => el.addEventListener('input', calcular));
+calcular();
+</script>
+</body>
+</html>
