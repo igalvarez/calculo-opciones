@@ -1,0 +1,609 @@
+
+      <html>
+        <head>
+          <meta charset="UTF-8">
+        </head>
+        <body>
+          <table border="1">
+            <thead>
+              <tr>
+                <th>TICKER</th>
+                <th>RANGO ÓPTIMO</th>
+                <th>MÍNIMO Y MÁXIMO</th>
+                <th>FECHA DE ANÁLISIS</th>
+                <th>Bloque Sector</th>
+                <th>Sectores</th>
+                <th>Indice</th>
+                <th>Nombre</th>
+              </tr>
+            </thead>
+            <tbody>
+    
+        <tr>
+          <td>AMZN</td>
+          <td>$140 - $230</td>
+          <td>MIN $130 MAX $240</td>
+          <td>2026-05-19</td>
+          <td>TECHNOLOGY</td>
+          <td>Consumer Cyclical | Internet Retrail</td>
+          <td>NASD</td>
+          <td>Amazon.com, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>AAPL</td>
+          <td>$35 - $90</td>
+          <td>MIN $30 MAX $100</td>
+          <td>2026-05-19</td>
+          <td>TECHNOLOGY</td>
+          <td>Technology | Consumer Electronics</td>
+          <td>NASD</td>
+          <td>Apple Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>GOOG</td>
+          <td>$60 - $170</td>
+          <td>MIN $50 MAX $170</td>
+          <td>2026-05-19</td>
+          <td>TECHNOLOGY</td>
+          <td>Communication Services | Internet Content &amp; Information</td>
+          <td>NASD</td>
+          <td>Alphabet Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>META</td>
+          <td>$150  - $210</td>
+          <td>MIN $145 MAX $220</td>
+          <td>2026-05-19</td>
+          <td>TECHNOLOGY</td>
+          <td>Communication Services | Internet Content &amp; Information</td>
+          <td>NASD</td>
+          <td>Meta Platforms, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>MSFT</td>
+          <td>$60 - $120</td>
+          <td>MIN $50 MAX $130</td>
+          <td>2026-05-19</td>
+          <td>TECHNOLOGY</td>
+          <td>Technology | Software - Infrastructure</td>
+          <td>NASD</td>
+          <td>Microsoft Corporation</td>
+        </tr>
+      
+        <tr>
+          <td>NFLX</td>
+          <td>$40 - $80</td>
+          <td>MIN $35 MAX $85</td>
+          <td>2026-05-19</td>
+          <td>TECHNOLOGY</td>
+          <td>Communication Services | Entertainment</td>
+          <td>NASD</td>
+          <td>Netflix, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>TSLA</td>
+          <td>$100 - $250</td>
+          <td>MIN $90 MAX $250</td>
+          <td>2026-05-19</td>
+          <td>TECHNOLOGY</td>
+          <td>Consumer Cyclical | Auto Manufacturers</td>
+          <td>NASD</td>
+          <td>Tesla, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>PLTR</td>
+          <td>$140 - $300</td>
+          <td>MIN $135 MAX $ 310</td>
+          <td>2026-05-19</td>
+          <td>TECHNOLOGY</td>
+          <td>Technology | Software - Infrastructure</td>
+          <td>NASD</td>
+          <td>PLTR - Palantir Technologies Inc Stock Price and Quote</td>
+        </tr>
+      
+        <tr>
+          <td>IBM</td>
+          <td>$115 - $220</td>
+          <td>MIN $110 MAX $230</td>
+          <td>2026-06-10</td>
+          <td>TECHNOLOGY</td>
+          <td>Information | Technology Services</td>
+          <td>NYSE</td>
+          <td>IBM - International Business Machines Corp</td>
+        </tr>
+      
+        <tr>
+          <td>ORCL</td>
+          <td>$80 - $130</td>
+          <td>MIN $70 MAX $140</td>
+          <td>2026-05-19</td>
+          <td>TECHNOLOGY</td>
+          <td>Technology | Software - Infrastructure</td>
+          <td>NASD</td>
+          <td>ORCL - Oracle Corp Stock Price and Quote</td>
+        </tr>
+      
+        <tr>
+          <td>NOW</td>
+          <td>$40 - $60</td>
+          <td>MIN $35 - $65</td>
+          <td>2026-07-06</td>
+          <td>TECHNOLOGY</td>
+          <td>Technology | Software - Application</td>
+          <td>NYSE</td>
+          <td>NOW - ServiceNow</td>
+        </tr>
+      
+        <tr>
+          <td>AMD</td>
+          <td>$150 - $235</td>
+          <td>MIN $140 MAX $240</td>
+          <td>2026-05-19</td>
+          <td>SEMICONDUCTORS</td>
+          <td>Technology | Semiconductors</td>
+          <td>NASD</td>
+          <td>Advanced Micro Devices, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>MU</td>
+          <td>$400 - $600</td>
+          <td>MIN $400 MAX $650</td>
+          <td>2026-05-19</td>
+          <td>SEMICONDUCTORS</td>
+          <td>Technology | Semiconductors</td>
+          <td>NASD</td>
+          <td>Micron Technology, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>NVDA</td>
+          <td>$80 - $170</td>
+          <td>MIN $75 MAX $175</td>
+          <td>2026-02-17</td>
+          <td>SEMICONDUCTORS</td>
+          <td>Technology | Semiconductors</td>
+          <td>NASD</td>
+          <td>NVIDIA Corporation</td>
+        </tr>
+      
+        <tr>
+          <td>QCOM</td>
+          <td>$80 - $160</td>
+          <td>MIN $70 MAX $170</td>
+          <td>2026-05-19</td>
+          <td>SEMICONDUCTORS</td>
+          <td>Technology | Semiconductors</td>
+          <td>NASD</td>
+          <td>QCOM - Qualcomm, Inc Stock Price and Quote</td>
+        </tr>
+      
+        <tr>
+          <td>AVGO</td>
+          <td>$70 - $140</td>
+          <td>MIN $ 65 MAX $145</td>
+          <td>2026-05-19</td>
+          <td>SEMICONDUCTORS</td>
+          <td>Technology | Semiconductors</td>
+          <td>NASD</td>
+          <td>AVGO - Broadcom Inc Stock Price and Quote</td>
+        </tr>
+      
+        <tr>
+          <td>INTC</td>
+          <td>$50 - $80</td>
+          <td>MIN $45 MAX $85</td>
+          <td>2026-06-10</td>
+          <td>SEMICONDUCTORS</td>
+          <td>Technology | Semiconductors</td>
+          <td>NASD</td>
+          <td>INTC - Intel Corp</td>
+        </tr>
+      
+        <tr>
+          <td>SOXL</td>
+          <td>$150 - $240</td>
+          <td>MIN $120 MAX $250</td>
+          <td>2026-05-19</td>
+          <td>SEMICONDUCTORS</td>
+          <td>Technology | Semiconductors</td>
+          <td>NASD</td>
+          <td>SOXL - Direxion Daily Semiconductor Bull 3X Shares Stock Price and Quote</td>
+        </tr>
+      
+        <tr>
+          <td>DASH</td>
+          <td>$160 - $240</td>
+          <td>MIN $155 MAX $245</td>
+          <td>2026-05-19</td>
+          <td>SOFTWARE - APP</td>
+          <td>Communication Services | Internet Content &amp; Information</td>
+          <td>NYSE</td>
+          <td>DoorDash, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>LYFT</td>
+          <td>$25 - $50</td>
+          <td>MIN $25 MAX $55</td>
+          <td>2026-05-19</td>
+          <td>SOFTWARE - APP</td>
+          <td>Technology | Software - Application</td>
+          <td>NASD</td>
+          <td>Lyft, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>UBER</td>
+          <td>$35 - $60</td>
+          <td>MIN $30 MAX $65</td>
+          <td>2026-05-19</td>
+          <td>SOFTWARE - APP</td>
+          <td>Technology | Software - Application</td>
+          <td>NYSE</td>
+          <td>Uber Technologies, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>HD</td>
+          <td>$120 - $240</td>
+          <td>MIN $120 MAX $240</td>
+          <td>2026-05-19</td>
+          <td>CONSUMER</td>
+          <td>Consumer Cyclical | Home Improvement Retail</td>
+          <td>NYSE</td>
+          <td>The Home Depot, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>LOW</td>
+          <td>$120 - $220</td>
+          <td>MIN $110 MAX $225</td>
+          <td>2026-05-19</td>
+          <td>CONSUMER</td>
+          <td>Consumer Cyclical | Home Improvement Retail</td>
+          <td>NYSE</td>
+          <td>Lowe&#039;s Companies, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>WMT</td>
+          <td>$60 - $110</td>
+          <td>MIN $55 MAX $115</td>
+          <td>2026-02-17</td>
+          <td>CONSUMER</td>
+          <td>Consumer Defensive | Discount Stores</td>
+          <td>NYSE</td>
+          <td>Walmart Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>DIA</td>
+          <td>$100 - $200</td>
+          <td>MIN $95 MAX $210</td>
+          <td>2026-05-19</td>
+          <td>INDEX - USA</td>
+          <td>Financial | Exchange Traded Fund</td>
+          <td>NYSE</td>
+          <td>SPDR Dow Jones Industrial Average ETF Trust</td>
+        </tr>
+      
+        <tr>
+          <td>QQQ</td>
+          <td>$35 - $55</td>
+          <td>MIN $30 MAX $60</td>
+          <td>2026-05-19</td>
+          <td>INDEX - USA</td>
+          <td>Financial | Exchange Traded Fund</td>
+          <td>NASD</td>
+          <td>Invesco QQQ Trust</td>
+        </tr>
+      
+        <tr>
+          <td>SPY</td>
+          <td>$30 - $45</td>
+          <td>MIN $25 MAX $50</td>
+          <td>2026-05-19</td>
+          <td>INDEX - USA</td>
+          <td>Financial | Exchange Traded Fund</td>
+          <td>NYSE</td>
+          <td>SPDR S&amp;P 500 ETF Trust</td>
+        </tr>
+      
+        <tr>
+          <td>SPX</td>
+          <td>$400 - $600</td>
+          <td>MIN $380 MAX $620</td>
+          <td>2026-05-19</td>
+          <td>INDEX - USA</td>
+          <td>Financial | Exchange Traded Fund</td>
+          <td>NYSE</td>
+          <td>SPDR S&amp;P 500 ETF Trust</td>
+        </tr>
+      
+        <tr>
+          <td>IWM</td>
+          <td>$40 - $70</td>
+          <td>MIN $35 MAX $70</td>
+          <td>2026-05-19</td>
+          <td>INDEX - USA</td>
+          <td>Financial | Exchange Traded Fund</td>
+          <td>NYSE</td>
+          <td>iShares Russell 2000 ETF</td>
+        </tr>
+      
+        <tr>
+          <td>TNA</td>
+          <td>$40 - $90</td>
+          <td>MIN $40 MAX $100</td>
+          <td>2026-05-19</td>
+          <td>INDEX - USA</td>
+          <td>Financial | Exchange Traded Fund</td>
+          <td>NYSE</td>
+          <td>Direxion Daily Small Cap Bull 3X Shares</td>
+        </tr>
+      
+        <tr>
+          <td>AXP</td>
+          <td>$85 - $190</td>
+          <td>MIN $80 MAX $195</td>
+          <td>2026-05-19</td>
+          <td>CARDS</td>
+          <td>Financial | Credit Services</td>
+          <td>NYSE</td>
+          <td>American Express Company</td>
+        </tr>
+      
+        <tr>
+          <td>C</td>
+          <td>$50 - $140</td>
+          <td>MIN $45 MAX $150</td>
+          <td>2026-05-19</td>
+          <td>CARDS</td>
+          <td>Financial | Credit Services</td>
+          <td>NYSE</td>
+          <td></td>
+        </tr>
+      
+        <tr>
+          <td>MA</td>
+          <td>$90 - $175</td>
+          <td>MIN $85 MAX $180</td>
+          <td>2026-05-19</td>
+          <td>CARDS</td>
+          <td>Financial | Credit Services</td>
+          <td>NYSE</td>
+          <td>Mastercard Incorporated</td>
+        </tr>
+      
+        <tr>
+          <td>PYPL</td>
+          <td>$50 - $80</td>
+          <td>MIN $40 MAX $90</td>
+          <td>2026-05-19</td>
+          <td>CARDS</td>
+          <td>Financial | Credit Services</td>
+          <td>NASD</td>
+          <td>PayPal Holdings, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>V</td>
+          <td>$60 - $170</td>
+          <td>MIN $55 MAX $175</td>
+          <td>2026-05-19</td>
+          <td>CARDS</td>
+          <td>Financial | Credit Services</td>
+          <td>NYSE</td>
+          <td>Visa Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>BABA</td>
+          <td>$40 - $60</td>
+          <td>MIN $40 MAX $70</td>
+          <td>2026-05-19</td>
+          <td>CHINA</td>
+          <td>Consumer Cyclical | Internet Retrail</td>
+          <td>NYSE</td>
+          <td>Alibaba Group Holding Limited</td>
+        </tr>
+      
+        <tr>
+          <td>LI</td>
+          <td>$25 - $60</td>
+          <td>MIN $25MAX $70</td>
+          <td>2026-05-19</td>
+          <td>CHINA</td>
+          <td>Consumer Cyclical | Auto Manufacturers</td>
+          <td>NASD</td>
+          <td>Li Auto Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>NIO</td>
+          <td>$30 - $75</td>
+          <td>MIN $25 MAX $75</td>
+          <td>2026-05-19</td>
+          <td>CHINA</td>
+          <td>Consumer Cyclical | Auto Manufacturers</td>
+          <td>NYSE</td>
+          <td>NIO Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>XPEV</td>
+          <td>$50 - 70</td>
+          <td>MIN $45 MAX $75</td>
+          <td>2026-05-19</td>
+          <td>CHINA</td>
+          <td>Consumer Cyclical | Auto Manufacturers</td>
+          <td>NYSE</td>
+          <td>XPeng Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>GLD</td>
+          <td>$40 - $80</td>
+          <td>MIN $40 MAX $90</td>
+          <td>2026-05-19</td>
+          <td>COMMODITY</td>
+          <td>Financial | Closed-End Fund - Equity</td>
+          <td>NYSE</td>
+          <td>The GDL Fund</td>
+        </tr>
+      
+        <tr>
+          <td>SLV</td>
+          <td>$40 - $75</td>
+          <td>MIN $35 MAX $80</td>
+          <td>2026-05-19</td>
+          <td>COMMODITY</td>
+          <td>Financial | Exchange Traded Fund</td>
+          <td>NYSE</td>
+          <td>iShares Silver Trust</td>
+        </tr>
+      
+        <tr>
+          <td>USO</td>
+          <td>$50 - $80</td>
+          <td>MIN $45 MAX $90</td>
+          <td>2026-05-19</td>
+          <td>COMMODITY</td>
+          <td>Financial | Exchange Traded Fund</td>
+          <td>NYSE</td>
+          <td>United States Oil Fund, LP</td>
+        </tr>
+      
+        <tr>
+          <td>COIN</td>
+          <td>$200 - $300</td>
+          <td>MIN $195 MAX $310</td>
+          <td>2026-05-19</td>
+          <td>FINANCIAL / DATA</td>
+          <td>Financial | Financial Data &amp; Stock Exchanges</td>
+          <td>NASD</td>
+          <td>Coinbase Global, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>HOOD</td>
+          <td>$100 - $150</td>
+          <td>MIN $90 MAX $ 160</td>
+          <td>2026-05-19</td>
+          <td>FINANCIAL / DATA</td>
+          <td>Financial | Financial Data &amp; Stock Exchanges</td>
+          <td>NASD</td>
+          <td>HOOD - Robinhood Markets Inc Stock Price and Quote</td>
+        </tr>
+      
+        <tr>
+          <td>CVS</td>
+          <td>$60 - $120</td>
+          <td>MIN $55 MAX $130</td>
+          <td>2026-05-19</td>
+          <td>HEALTCARE</td>
+          <td>Healthcare | Healthcare Plans</td>
+          <td>NYSE</td>
+          <td>CVS Health Corporation</td>
+        </tr>
+      
+        <tr>
+          <td>MRNA</td>
+          <td>$50 - $130</td>
+          <td>MIN $50 MAX $130</td>
+          <td>2026-05-19</td>
+          <td>HEALTCARE</td>
+          <td>Healthcare | Biotechnology</td>
+          <td>NASD</td>
+          <td>Moderna, Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>PFE</td>
+          <td>$30 - $70</td>
+          <td>MIN $25 MAX $75</td>
+          <td>2026-05-19</td>
+          <td>HEALTCARE</td>
+          <td>Healthcare | Drug Manufacturers - General</td>
+          <td>NYSE</td>
+          <td>Pfizer Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>BA</td>
+          <td>$60 - $170</td>
+          <td>MIN $50 MAX $180</td>
+          <td>2026-05-19</td>
+          <td>INDUSTRIALS</td>
+          <td>Industrials | Aerospace &amp; Defense</td>
+          <td>NYSE</td>
+          <td>The Boeing Company</td>
+        </tr>
+      
+        <tr>
+          <td>URA</td>
+          <td>$55 - $80</td>
+          <td>MIN $55 MAX $85</td>
+          <td>2026-05-19</td>
+          <td>NUCLEAR ENERGY</td>
+          <td>Financial | Exchange Traded Fund</td>
+          <td>NYSE</td>
+          <td>URA - Global X Uranium ETF Stock Price and Quote</td>
+        </tr>
+      
+        <tr>
+          <td>CCL</td>
+          <td>$40 -$60</td>
+          <td>MIN $35 MAX $65</td>
+          <td>2026-05-19</td>
+          <td>CRUISES</td>
+          <td>Consumer Cyclical | Travel Services</td>
+          <td>NYSE</td>
+          <td>Carnival Corporation &amp; plc</td>
+        </tr>
+      
+        <tr>
+          <td>RCL</td>
+          <td>$80 - $150</td>
+          <td>MIN $ 75 MAX 155</td>
+          <td>2026-05-19</td>
+          <td>CRUISES</td>
+          <td>Consumer Cyclical | Travel Services</td>
+          <td>NYSE</td>
+          <td>Royal Caribbean Cruises Ltd.</td>
+        </tr>
+      
+        <tr>
+          <td>AAL</td>
+          <td>$40 - $70</td>
+          <td>MIN $30 MAX $70</td>
+          <td>2026-05-19</td>
+          <td>AERONAUTICAL</td>
+          <td>Industrials | Airlines</td>
+          <td>NYSE</td>
+          <td>American Airlines Group Inc.</td>
+        </tr>
+      
+        <tr>
+          <td>DAL</td>
+          <td>$40 - $65</td>
+          <td>MIN $35 MAX $70</td>
+          <td>2026-05-19</td>
+          <td>AERONAUTICAL</td>
+          <td>Consumer Cyclical | Travel Services</td>
+          <td>NYSE</td>
+          <td>Delta Air Lines, Inc.</td>
+        </tr>
+      
+            </tbody>
+          </table>
+        </body>
+      </html>
+    
