@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calculadora Opciones</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+    margin: 0;
+  }
+
+  .card {
+    background: #161b22;
+    border: none;
+    border-radius: 0;
+    padding: 24px 32px;
+    width: 100%;
+    min-height: 100vh;
+  }
+
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #21262d;
+  }
+
+  h1 { font-size: 18px; font-weight: 600; color: #e6edf3; }
+  .meta { font-size: 12px; color: #484f58; text-align: right; line-height: 1.5; }
+  .meta .src { color: #6e7681; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 1px 1fr;
+    gap: 0 16px;
+    align-items: start;
+  }
+
+  .divider-v { background: #21262d; width: 1px; align-self: stretch; }
+
+  .section-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    margin-bottom: 10px;
+  }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  label  { font-size: 13px; color: #8b949e; }
+
+  input, select {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #e6edf3;
+    font-size: 18px;
+    font-weight: 600;
+    padding: 10px 12px;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  select { cursor: pointer; }
+  select option { background: #161b22; color: #e6edf3; font-weight: 600; }
+  select:disabled { opacity: 0.5; cursor: wait; }
+
+  input:focus, select:focus { border-color: #58a6ff; }
+  input.ask-ok   { border-color: #238636; }
+  input.ask-mid  { border-color: #d29922; background: #1a1408; }
+  input.ask-warn { border-color: #da3633; background: #1a0a0a; }
+
+  .ask-hint { font-size: 13px; min-height: 18px; }
+  .ask-hint.ok   { color: #3fb950; }
+  .ask-hint.mid  { color: #d29922; }
+  .ask-hint.warn { color: #f85149; }
+
+  .sep-h { border: none; border-top: 1px solid #21262d; margin: 16px 0; }
+
+  .range-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #8b949e;
+  }
+  .range-display .val { color: #f0a030; font-weight: 700; font-size: 16px; }
+  .range-display.alt .val { color: #6e7681; font-size: 14px; }
+  .range-display .fecha { margin-left: auto; font-size: 12px; color: #484f58; }
+
+  .plan-toggle { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+  .plan-btn {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #8b949e;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 10px;
+    text-align: center;
+    transition: all 0.15s;
+  }
+
+  .plan-btn.active      { background: #1f3a5f; border-color: #58a6ff; color: #58a6ff; }
+  .plan-btn.p100.active { background: #2d1f5f; border-color: #a371f7; color: #a371f7; }
+
+  .results { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+
+  .result-box {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 20px 10px;
+    text-align: center;
+    transition: border-color 0.3s;
+  }
+
+  .result-label { font-size: 13px; color: #8b949e; margin-bottom: 8px; }
+  .result-value { font-size: 32px; font-weight: 700; color: #e6edf3; }
+  .result-value.hi { color: #f0a030; }
+  .result-value.pu { color: #a371f7; }
+  .result-box.green { border-color: #238636; }
+  .result-box.red   { border-color: #da3633; }
+
+  .saldo-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-radius: 8px;
+    padding: 16px 20px;
+    border: 1px solid;
+    transition: all 0.3s;
+  }
+
+  .saldo-row.ok   { background: #0d2818; border-color: #238636; }
+  .saldo-row.warn { background: #2d1212; border-color: #da3633; }
+
+  .saldo-status { font-size: 16px; font-weight: 600; }
+  .saldo-row.ok   .saldo-status { color: #3fb950; }
+  .saldo-row.warn .saldo-status { color: #f85149; }
+  .saldo-detail { font-size: 13px; color: #8b949e; margin-top: 4px; }
+  .saldo-right  { font-size: 28px; font-weight: 700; color: #e6edf3; white-space: nowrap; margin-left: 8px; }
+
+  .error-banner {
+    background: #2d1212;
+    border: 1px solid #da3633;
+    border-radius: 6px;
+    color: #f85149;
+    font-size: 13px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    display: none;
+    line-height: 1.6;
+  }
+  .error-banner code { background: #0d1117; padding: 2px 6px; border-radius: 3px; color: #e6edf3; }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <div class="header">
+    <h1>📊 Calculadora de Opciones</h1>
+    <div class="meta">
+      <div>Version · 2.1</div>
+      <div class="src" id="meta-src">Cargando rp.xls…</div>
+    </div>
+  </div>
+
+  <div class="error-banner" id="error-banner"></div>
+
+  <div class="layout">
+
+    <!-- IZQUIERDA -->
+    <div>
+      <div class="section-label">Ticker</div>
+      <div class="field" style="margin-bottom:7px;">
+        <select id="ticker-select" onchange="onTickerChange()" disabled>
+          <option value="">— Cargando… —</option>
+        </select>
+      </div>
+
+      <div class="range-display" id="range-display" style="display:none;">
+        <span>Rango óptimo:</span>
+        <span class="val" id="range-opt">—</span>
+        <span class="fecha" id="range-fecha"></span>
+      </div>
+
+      <div class="range-display alt" id="range-display-mm" style="display:none;">
+        <span>Mín / Máx:</span>
+        <span class="val" id="range-mm">—</span>
+      </div>
+
+      <div class="range-display" id="range-display-contratos" style="display:none;">
+        <span>Máx contratos</span>
+        <span style="font-size:11px; color:#484f58;">(50% monto ÷ optMax×100)</span>
+        <span class="val" id="range-contratos-val" style="color:#f0a030; font-size:20px;">—</span>
+        <span style="margin-left:auto; font-size:12px; color:#484f58;" id="range-contratos-detalle"></span>
+      </div>
+
+      <hr class="sep-h">
+      <div class="section-label">Operación</div>
+
+      <div class="grid2" style="margin-bottom:8px;">
+        <div class="field">
+          <label>Monto inicial ($)</label>
+          <input type="number" id="monto" placeholder="800" value="800">
+        </div>
+        <div class="field">
+          <label>Contratos</label>
+          <input type="number" id="contratos" placeholder="1" min="1" value="1">
+        </div>
+        <div class="field">
+          <label>ASK (prima)</label>
+          <input type="number" id="ask" placeholder="1.24" step="0.01">
+          <div class="ask-hint" id="ask-hint"></div>
+        </div>
+        <div class="field">
+          <label>Plus ($)</label>
+          <input type="number" id="plus" placeholder="2" value="2" step="1" min="0">
+        </div>
+      </div>
+
+      <div class="section-label">Plan</div>
+      <div class="plan-toggle">
+        <div class="plan-btn active" id="btn10"  onclick="setPlan(10)">10%</div>
+        <div class="plan-btn"        id="btn35"  onclick="setPlan(35)">35%</div>
+        <div class="plan-btn p100"   id="btn100" onclick="setPlan(100)">100%</div>
+      </div>
+    </div>
+
+    <!-- DIVISOR -->
+    <div class="divider-v"></div>
+
+    <!-- DERECHA -->
+    <div>
+      <div class="section-label">Resultados</div>
+      <div class="results">
+        <div class="result-box">
+          <div class="result-label">LIMIT</div>
+          <div class="result-value hi" id="res-limit">—</div>
+        </div>
+        <div class="result-box" id="box-coste">
+          <div class="result-label">Coste</div>
+          <div class="result-value" id="res-coste">—</div>
+        </div>
+        <div class="result-box">
+          <div class="result-label">Beneficio</div>
+          <div class="result-value" id="res-beneficio">—</div>
+        </div>
+      </div>
+
+      <div class="saldo-row ok" id="saldo-box" style="margin-top:8px;">
+        <div>
+          <div class="saldo-status" id="saldo-status">Selecciona un ticker</div>
+          <div class="saldo-detail" id="saldo-detail">—</div>
+        </div>
+        <div class="saldo-right" id="res-saldo">—</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   CONFIGURACIÓN
+   ═══════════════════════════════════════════════════════════ */
+const ARCHIVO_DATOS = 'rp.xls';   // debe estar en la misma carpeta que este HTML
+
+let TICKERS  = [];
+let plan     = 10;
+let optMin   = 0,  optMax   = 9999;   // rango óptimo
+let hardMin  = 0,  hardMax  = 9999;   // mín/máx absoluto
+
+const sel = document.getElementById('ticker-select');
+
+/* ═══════════════════════════════════════════════════════════
+   CARGA DEL EXCEL
+   ═══════════════════════════════════════════════════════════ */
+
+/** Extrae los dos números de textos tipo "$140 - $230", "$40 -$60", "$50 - 70" */
+function extraerRango(txt) {
+  if (!txt) return null;
+  const nums = String(txt).match(/\d+(?:[.,]\d+)?/g);
+  if (!nums || nums.length < 2) return null;
+  const a = parseFloat(nums[0].replace(',', '.'));
+  const b = parseFloat(nums[1].replace(',', '.'));
+  if (isNaN(a) || isNaN(b)) return null;
+  return { min: Math.min(a, b), max: Math.max(a, b) };
+}
+
+function fmtRango(r) {
+  if (!r) return '—';
+  return '$' + r.min + ' - $' + r.max;
+}
+
+/** Convierte una matriz de filas (array de arrays) en el array TICKERS */
+function filasATickers(filas) {
+  const out = [];
+  for (const fila of filas) {
+    if (!fila || fila.length < 3) continue;
+    const ticker = String(fila[0] || '').trim().toUpperCase();
+    // descartar cabeceras y filas vacías
+    if (!ticker || ticker === 'TICKER' || ticker.length > 6) continue;
+    if (!/^[A-Z.\-]+$/.test(ticker)) continue;
+
+    const opt = extraerRango(fila[1]);
+    if (!opt) continue;
+
+    const mm     = extraerRango(fila[2]) || opt;
+    const fecha  = String(fila[3] || '').trim();
+    const nombre = String(fila[fila.length - 1] || '').trim() || ticker;
+
+    out.push({
+      t: ticker,
+      name: nombre.length > 40 ? nombre.slice(0, 40) + '…' : nombre,
+      optTxt: fmtRango(opt),
+      mmTxt:  fmtRango(mm),
+      optMin: opt.min,  optMax: opt.max,
+      mmMin:  mm.min,   mmMax:  mm.max,
+      fecha: fecha
+    });
+  }
+  return out;
+}
+
+/** Parsea un .xls que en realidad es HTML (export de Google Sheets) */
+function parsearComoHTML(texto) {
+  const doc = new DOMParser().parseFromString(texto, 'text/html');
+  const filas = [];
+  doc.querySelectorAll('tr').forEach(tr => {
+    const celdas = [];
+    tr.querySelectorAll('td, th').forEach(td => celdas.push(td.textContent.trim()));
+    if (celdas.some(c => c)) filas.push(celdas);
+  });
+  return filas;
+}
+
+/** Parsea un .xls / .xlsx binario real con SheetJS */
+function parsearComoExcel(buffer) {
+  const wb = XLSX.read(buffer, { type: 'array' });
+  const hoja = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(hoja, { header: 1, blankrows: false, defval: '' });
+}
+
+function mostrarError(msg) {
+  const b = document.getElementById('error-banner');
+  b.innerHTML = msg;
+  b.style.display = 'block';
+  document.getElementById('meta-src').textContent = 'Error al cargar datos';
+  sel.innerHTML = '<option value="">— Sin datos —</option>';
+  sel.disabled = true;
+}
+
+async function cargarDatos() {
+  try {
+    const resp = await fetch(ARCHIVO_DATOS + '?v=' + Date.now());
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+    const buffer = await resp.arrayBuffer();
+
+    // Detectar si el contenido es HTML disfrazado de .xls
+    const cabecera = new TextDecoder('utf-8')
+                       .decode(buffer.slice(0, 200))
+                       .toLowerCase();
+    const esHTML = cabecera.includes('<html') ||
+                   cabecera.includes('<!doctype') ||
+                   cabecera.includes('<table');
+
+    let filas;
+    if (esHTML) {
+      filas = parsearComoHTML(new TextDecoder('utf-8').decode(buffer));
+    } else {
+      filas = parsearComoExcel(buffer);
+    }
+
+    TICKERS = filasATickers(filas);
+
+    if (!TICKERS.length) {
+      mostrarError('El archivo <code>' + ARCHIVO_DATOS + '</code> se cargó pero no se encontró ningún ticker válido. ' +
+                   'Comprueba que la columna A tenga el ticker y la columna B el rango óptimo.');
+      return;
+    }
+
+    poblarSelect();
+    document.getElementById('meta-src').textContent =
+      TICKERS.length + ' tickers · ' + ARCHIVO_DATOS;
+
+  } catch (err) {
+    mostrarError(
+      'No se pudo leer <code>' + ARCHIVO_DATOS + '</code>.<br>' +
+      'Asegúrate de que está en la misma carpeta que este HTML y de que abres la página ' +
+      'por HTTP (GitHub Pages o servidor local), no con doble clic.<br>' +
+      '<span style="color:#8b949e">Detalle: ' + err.message + '</span>'
+    );
+  }
+}
+
+function poblarSelect() {
+  sel.innerHTML = '<option value="">— Selecciona un ticker —</option>';
+  TICKERS.forEach(tk => {
+    const opt = document.createElement('option');
+    opt.value = tk.t;
+    opt.textContent = tk.t + ' — ' + tk.name + '  (' + tk.optTxt + ')';
+    sel.appendChild(opt);
+  });
+  sel.disabled = false;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LÓGICA DE LA CALCULADORA
+   ═══════════════════════════════════════════════════════════ */
+
+function calcularMaxContratos() {
+  const monto = parseFloat(document.getElementById('monto').value) || 0;
+  const dContratos = document.getElementById('range-display-contratos');
+
+  if (!sel.value || optMax >= 9999 || monto <= 0) {
+    dContratos.style.display = 'none';
+    return;
+  }
+
+  const disponible = monto * 0.5;
+  const costePorContrato = optMax * 100;          // optMax ya está en $ de prima
+  const maxContratos = Math.floor(disponible / costePorContrato);
+
+  document.getElementById('range-contratos-val').textContent = maxContratos > 0 ? maxContratos : '0';
+  document.getElementById('range-contratos-detalle').textContent =
+    '$' + disponible.toFixed(0) + ' ÷ $' + costePorContrato.toFixed(0);
+
+  dContratos.style.display = 'flex';
+
+  // Actualizar el campo Contratos automáticamente
+  const contratosInput = document.getElementById('contratos');
+  if (maxContratos > 0) {
+    contratosInput.value = maxContratos;
+  }
+}
+
+function onTickerChange() {
+  const val = sel.value;
+  const dOpt = document.getElementById('range-display');
+  const dMM  = document.getElementById('range-display-mm');
+
+  if (!val) {
+    dOpt.style.display = 'none';
+    dMM.style.display  = 'none';
+    document.getElementById('range-display-contratos').style.display = 'none';
+    optMin = 0; optMax = 9999; hardMin = 0; hardMax = 9999;
+    calcular(); return;
+  }
+
+  const tk = TICKERS.find(t => t.t === val);
+  if (!tk) return;
+
+  optMin  = tk.optMin / 100;  optMax  = tk.optMax / 100;
+  hardMin = tk.mmMin  / 100;  hardMax = tk.mmMax  / 100;
+
+  document.getElementById('range-opt').textContent   = tk.optTxt;
+  document.getElementById('range-mm').textContent    = tk.mmTxt;
+  document.getElementById('range-fecha').textContent = tk.fecha ? 'act. ' + tk.fecha : '';
+  dOpt.style.display = 'flex';
+  dMM.style.display  = 'flex';
+  calcularMaxContratos();
+  calcular();
+}
+
+function setPlan(p) {
+  plan = p;
+  document.getElementById('btn10').classList.toggle('active', p === 10);
+  document.getElementById('btn35').classList.toggle('active', p === 35);
+  document.getElementById('btn100').classList.toggle('active', p === 100);
+  document.getElementById('res-limit').className = 'result-value ' + (p === 100 ? 'pu' : 'hi');
+  calcular();
+}
+
+function fmt(n) { return '$' + n.toFixed(2); }
+
+function calcular() {
+  const monto     = parseFloat(document.getElementById('monto').value)     || 0;
+  const contratos = parseFloat(document.getElementById('contratos').value) || 0;
+  const ask       = parseFloat(document.getElementById('ask').value);
+  const plus      = parseFloat(document.getElementById('plus').value)      || 0;
+
+  const askInput = document.getElementById('ask');
+  const askHint  = document.getElementById('ask-hint');
+
+  if (!isNaN(ask) && ask > 0) {
+    if (ask >= optMin && ask <= optMax) {
+      askInput.className  = 'ask-ok';
+      askHint.className   = 'ask-hint ok';
+      askHint.textContent = '✓ en rango óptimo';
+    } else if (ask >= hardMin && ask <= hardMax) {
+      askInput.className  = 'ask-mid';
+      askHint.className   = 'ask-hint mid';
+      askHint.textContent = '⚠ fuera del óptimo, dentro de mín/máx';
+    } else {
+      askInput.className  = 'ask-warn';
+      askHint.className   = 'ask-hint warn';
+      askHint.textContent = ask < hardMin ? '✗ muy bajo' : '✗ muy alto';
+    }
+  } else {
+    askInput.className  = '';
+    askHint.className   = 'ask-hint';
+    askHint.textContent = '';
+  }
+
+  if (isNaN(ask) || ask <= 0) {
+    ['res-limit','res-coste','res-beneficio','res-saldo'].forEach(id =>
+      document.getElementById(id).textContent = '—');
+    document.getElementById('saldo-status').textContent = 'Introduce el ASK';
+    document.getElementById('saldo-detail').textContent = '—';
+    return;
+  }
+
+  const limit     = Math.round((ask * (1 + plan / 100) + plus / 100) * 100) / 100;
+  const coste     = ask * 100 * contratos;
+  const beneficio = (limit - ask) * 100 * contratos;
+  const saldo     = monto * 0.5 + beneficio;
+
+  document.getElementById('res-limit').textContent     = '$' + limit.toFixed(2);
+  document.getElementById('res-coste').textContent     = fmt(coste);
+  document.getElementById('res-beneficio').textContent = fmt(beneficio);
+  document.getElementById('res-saldo').textContent     = fmt(saldo);
+
+  const box    = document.getElementById('saldo-box');
+  const boxC   = document.getElementById('box-coste');
+  const status = document.getElementById('saldo-status');
+  const detail = document.getElementById('saldo-detail');
+
+  if (coste <= saldo) {
+    box.className  = 'saldo-row ok';
+    boxC.className = 'result-box green';
+    status.textContent = '✅ Saldo suficiente';
+    detail.textContent = fmt(coste) + ' coste vs ' + fmt(saldo) + ' disponible';
+  } else {
+    box.className  = 'saldo-row warn';
+    boxC.className = 'result-box red';
+    status.textContent = '⚠️ Saldo insuficiente';
+    detail.textContent = 'Necesitas ' + fmt(coste) + ' pero tienes ' + fmt(saldo);
+  }
+}
+
+document.querySelectorAll('input').forEach(el => el.addEventListener('input', calcular));
+document.getElementById('monto').addEventListener('input', calcularMaxContratos);
+cargarDatos();
+calcular();
+</script>
+</body>
+</html>
