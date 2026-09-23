@@ -454,11 +454,8 @@ function calcularMaxContratos() {
 
   dContratos.style.display = 'flex';
 
-  // Actualizar el campo Contratos automáticamente
-  const contratosInput = document.getElementById('contratos');
-  if (maxContratos > 0) {
-    contratosInput.value = maxContratos;
-  }
+  // Actualizar el campo Contratos automáticamente siempre
+  document.getElementById('contratos').value = maxContratos > 0 ? maxContratos : 1;
 }
 
 function onTickerChange() {
