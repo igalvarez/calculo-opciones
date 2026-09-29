@@ -7,6 +7,7 @@ _modulos_requeridos = {
     "colorama": "colorama",
     "lxml":     "lxml",
     "bs4":      "beautifulsoup4",
+    "yfinance": "yfinance",
 }
 
 _faltantes = []
@@ -41,6 +42,54 @@ init(autoreset=True)
 
 def get_cache_path():
     return os.path.join(tempfile.gettempdir(), "get_info_target_cache.json")
+
+def get_caida_vol_pct(ticker):
+    """
+    Usa yfinance para obtener el histórico de los últimos 30 días.
+    Identifica el día de mayor caída (%) en los últimos 10 días de trading.
+    Calcula el volumen de ese día vs la media de los 20 días anteriores.
+    Devuelve (pct, fecha_str) o (None, None) si no hay datos.
+    """
+    try:
+        import yfinance as yf
+        df = yf.download(ticker, period="40d", interval="1d", progress=False, auto_adjust=True)
+        if df is None or len(df) < 5:
+            return None, None
+
+        # Aplanar columnas MultiIndex si las hay
+        if hasattr(df.columns, 'levels'):
+            df.columns = df.columns.get_level_values(0)
+
+        df = df.dropna(subset=["Close", "Open", "Volume"])
+        if len(df) < 5:
+            return None, None
+
+        # Últimos 10 días de trading
+        recientes = df.iloc[-10:].copy()
+
+        # Día de MAYOR VOLUMEN en los últimos 10 días → ese es el día del evento
+        idx_caida = recientes["Volume"].idxmax()
+        row_caida = recientes.loc[idx_caida]
+
+        vol_caida = float(row_caida["Volume"])
+        fecha_caida = idx_caida.strftime("%d/%m") if hasattr(idx_caida, 'strftime') else str(idx_caida)[:10]
+
+        # Media de volumen de los 20 días ANTERIORES al día de caída
+        pos = df.index.get_loc(idx_caida)
+        inicio = max(0, pos - 20)
+        previos = df.iloc[inicio:pos]
+        if len(previos) < 3:
+            return None, None
+
+        avg_vol = float(previos["Volume"].mean())
+        if avg_vol == 0:
+            return None, None
+
+        pct = ((vol_caida - avg_vol) / avg_vol) * 100
+        return pct, fecha_caida
+
+    except Exception:
+        return None, None
 
 def load_cache():
     path = get_cache_path()
@@ -533,12 +582,13 @@ def fetch_stock_details(ticker):
                 if key:
                     data[key] = val
         return {
-            "Recom":   data.get("Recom", ""),
-            "Book/sh": data.get("Book/sh", ""),
-            "Sales":   data.get("Sales", ""),
-            "Income":  data.get("Income", ""),
-            "Index":   data.get("Index", ""),
-            "IPO":     data.get("IPO", ""),
+            "Recom":      data.get("Recom", ""),
+            "Book/sh":    data.get("Book/sh", ""),
+            "Sales":      data.get("Sales", ""),
+            "Income":     data.get("Income", ""),
+            "Index":      data.get("Index", ""),
+            "IPO":        data.get("IPO", ""),
+            "Avg Volume": data.get("Avg Volume", ""),
         }
     except Exception as e:
         print(f"    ERROR en fetch_stock_details({ticker}): {e}")
@@ -682,6 +732,8 @@ def fetch_below20_screener():
             s["ok_inc"]   = False
             s["ok_idx"]   = False
             s["ok_ipo"]   = False
+            s["VolPct"]   = None
+            s["VolFecha"] = None
             continue
 
         price_f   = to_float(s["Price"])
@@ -715,6 +767,11 @@ def fetch_below20_screener():
         s["ok_inc"]   = income_f is not None and income_f > 0
         s["ok_idx"]   = bool(index_val) and index_val not in ("-", "N/A")
         s["ok_ipo"]   = ipo_ok
+
+        # ── VOLUMEN: día de mayor caída en últimos 10 días via yfinance ───────
+        vol_pct, vol_fecha = get_caida_vol_pct(ticker)
+        s["VolPct"]   = vol_pct
+        s["VolFecha"] = vol_fecha
 
     print(" " * 50, end="\r")  # limpiar línea de progreso
     return stocks
@@ -779,10 +836,10 @@ def print_below20_table(stocks):
     all_pass = [s for s in stocks if s.get("ok_pb") and s.get("ok_sales") and s.get("ok_inc") and s.get("ok_idx") and s.get("ok_ipo")]
     print(f"\n  {len(stocks)} resultado(s) del screener  |  {Fore.GREEN}{len(all_pass)} cumple(n) todos los filtros{Style.RESET_ALL}\n")
 
-    # Columnas: datos + 5 validaciones
+    # Columnas: datos + 5 validaciones + Vol%
     columns = [
         "#", "Ticker", "Company", "Sector", "Market Cap", "Price", "Change%",
-        "P/B<3", "Sales>0", "Inc>0", "Index", "IPO",
+        "P/B<3", "Sales>0", "Inc>0", "Index", "IPO", "Vol%",
     ]
 
     # Construir filas con flag all_ok para ordenar
@@ -812,6 +869,22 @@ def print_below20_table(stocks):
         idx_text   = idx_val if idx_val != "-" else "-"
         ipo_text   = ipo_val if ipo_val != "-" else "-"
 
+        # Vol% — siempre visible con fecha del día de caída
+        vol_pct   = s.get("VolPct")
+        vol_fecha = s.get("VolFecha")
+        if vol_pct is not None:
+            fecha_tag = f" ({vol_fecha})" if vol_fecha else ""
+            vol_str   = f"{vol_pct:+.0f}%{fecha_tag}"
+            if vol_pct >= 200:
+                vol_color = Fore.GREEN
+            elif vol_pct >= 50:
+                vol_color = Fore.YELLOW
+            else:
+                vol_color = Fore.RED
+        else:
+            vol_str   = "—"
+            vol_color = ""
+
         row = [
             "",  # placeholder para #, se rellena después de ordenar
             s["Ticker"],
@@ -825,6 +898,7 @@ def print_below20_table(stocks):
             inc_text,
             idx_text,
             ipo_text,
+            vol_str,
         ]
         colors = {
             "chg":   chg_color,
@@ -833,12 +907,19 @@ def print_below20_table(stocks):
             "inc":   Fore.GREEN if ok_inc   else Fore.RED,
             "idx":   Fore.GREEN if ok_idx   else Fore.RED,
             "ipo":   Fore.GREEN if ok_ipo   else Fore.RED,
+            "vol":   vol_color,
             "all_ok": all_ok,
         }
         entries.append((all_ok, row, colors))
 
-    # Ordenar: las que pasan todos los filtros primero
-    entries.sort(key=lambda x: (not x[0], x[1][1]))  # all_ok desc, luego ticker asc
+    # Ordenar: las que pasan todos los filtros primero, el resto por Market Cap desc
+    def sort_key(entry):
+        all_ok = entry[0]
+        market_cap_str = entry[1][4]  # columna Market Cap
+        cap_val = parse_market_cap_value(market_cap_str)
+        return (not all_ok, -cap_val)
+
+    entries.sort(key=sort_key)
 
     # Renumerar y asignar colores finales
     rows       = []
@@ -861,6 +942,7 @@ def print_below20_table(stocks):
     IDX_INC   = 9
     IDX_IDX   = 10
     IDX_IPO   = 11
+    IDX_VOL   = 12
 
     VAL_COLS = {IDX_PB, IDX_SALES, IDX_INC, IDX_IDX, IDX_IPO}
     GREY = Fore.LIGHTBLACK_EX  # gris para filas que no pasan
@@ -875,7 +957,8 @@ def print_below20_table(stocks):
             text = str(c).center(widths[j]) if j in VAL_COLS else str(c).ljust(widths[j])
             if all_ok:
                 # Fila que pasa: colores normales en validaciones, ticker en verde
-                if   j == IDX_CHG   and colors["chg"]:   text = f"{colors['chg']}{text}{Style.RESET_ALL}"
+                if   j == IDX_CHG and colors["chg"]:     text = f"{colors['chg']}{text}{Style.RESET_ALL}"
+                elif j == IDX_VOL and colors["vol"]:      text = f"{colors['vol']}{text}{Style.RESET_ALL}"
                 elif j in VAL_COLS:                       text = f"{Fore.GREEN}{text}{Style.RESET_ALL}"
                 elif j == 1:                              text = f"{Fore.GREEN}{text}{Style.RESET_ALL}"
             else:
@@ -883,6 +966,8 @@ def print_below20_table(stocks):
                 if j in VAL_COLS:
                     color_key = {IDX_PB: "pb", IDX_SALES: "sales", IDX_INC: "inc", IDX_IDX: "idx", IDX_IPO: "ipo"}[j]
                     text = f"{colors[color_key]}{text}{Style.RESET_ALL}"
+                elif j == IDX_VOL and colors["vol"]:
+                    text = f"{colors['vol']}{text}{Style.RESET_ALL}"
                 elif j == IDX_CHG and colors["chg"]:
                     text = f"{GREY}{text}{Style.RESET_ALL}"
                 else:
@@ -925,6 +1010,10 @@ def print_help():
                 Market Cap >500M, Target Price +50%, Analyst Buy+,
                 Price 20% below SMA20, Country USA.
               No requiere tickers como argumento.
+              Columna Vol%: % de volumen del día de mayor caída (últimos 10 días)
+                vs la media de los 20 días anteriores a esa caída. Via yfinance.
+                Verde >+200% (capitulación), Amarillo +50-200%, Rojo <+50%
+                Se muestra siempre con la fecha del día de la caída.
 
   --help      Muestra esta ayuda.
 
