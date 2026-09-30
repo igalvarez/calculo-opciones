@@ -111,6 +111,37 @@ def get_caida_vol_pct(ticker):
     except Exception:
         return None, None
 
+def get_dist_sma20(ticker):
+    """
+    Usa yfinance para calcular cuánto se separa el precio actual de su SMA20.
+    Devuelve el % de distancia (negativo si está POR DEBAJO de la media), o
+    None si no hay datos suficientes.
+        dist = (precio - SMA20) / SMA20 * 100
+    """
+    try:
+        import yfinance as yf
+        df = yf.download(ticker, period="40d", interval="1d", progress=False, auto_adjust=True)
+        if df is None or len(df) < 20:
+            return None
+
+        # Aplanar columnas MultiIndex si las hay
+        if hasattr(df.columns, "levels"):
+            df.columns = df.columns.get_level_values(0)
+
+        df = df.dropna(subset=["Close"])
+        if len(df) < 20:
+            return None
+
+        sma20 = float(df["Close"].iloc[-20:].mean())
+        price = float(df["Close"].iloc[-1])
+        if sma20 == 0:
+            return None
+
+        return ((price - sma20) / sma20) * 100
+
+    except Exception:
+        return None
+
 def load_cache():
     path = get_cache_path()
     if os.path.exists(path):
@@ -647,6 +678,7 @@ def fetch_below20_screener():
     """
     from lxml import html as lxml_html
     import time
+    import re
 
     url = (
         "https://finviz.com/screener.ashx"
@@ -663,7 +695,26 @@ def fetch_below20_screener():
         "Referer":         "https://finviz.com/",
     }
 
+    # Orden de columnas de la vista v=111 (fijo, lo define Finviz).
+    # Centralizado aquí para no usar índices "mágicos" sueltos por el código.
+    # OJO: esta tabla NO trae fila de cabecera; el primer <tr> ya es un dato.
+    COL = {
+        "no": 0, "ticker": 1, "company": 2, "sector": 3, "industry": 4,
+        "country": 5, "market_cap": 6, "pe": 7, "price": 8, "change": 9, "volume": 10,
+    }
+
+    def ticker_from_row(tr):
+        """Ticker limpio sacado del href (?t=XXX), o None si la fila no es de datos."""
+        for a in tr.xpath('.//a[@href]'):
+            href = a.get("href", "")
+            if "t=" in href:
+                m = re.search(r'[?&]t=([A-Za-z0-9.\-]+)', href)
+                if m:
+                    return m.group(1).upper()
+        return None
+
     stocks = []
+    seen   = set()
     page   = 1
 
     while True:
@@ -676,56 +727,46 @@ def fetch_below20_screener():
             break
 
         tree = lxml_html.fromstring(resp.content)
-        rows = tree.xpath('//table[contains(@class,"screener_table")]//tr[position()>1]')
-        if not rows:
-            rows = tree.xpath('//tr[@class="table-light-row-cp" or @class="table-dark-row-cp"]')
-        if not rows:
+
+        # Acotar a la tabla de resultados (evita pescar tickers de otros widgets).
+        # Fallback por clase de fila si cambiara la clase de la tabla.
+        table = tree.xpath('//table[contains(@class,"screener_table")]')
+        if table:
+            tr_list = table[0].xpath('.//tr')
+        else:
+            tr_list = tree.xpath('//tr[@class="table-light-row-cp" or @class="table-dark-row-cp"]')
+        if not tr_list:
             break
 
-        for row in rows:
-            cols = [td.text_content().strip() for td in row.xpath('.//td')]
-            # Extraer ticker del href: buscar cualquier enlace con "t=" en la URL
-            ticker = None
-            all_links = row.xpath('.//a[@href]')
-            for link in all_links:
-                href = link.get("href", "")
-                # href puede ser "quote.ashx?t=ACAD&..." o "stock?t=ACAD&..."
-                if "t=" in href:
-                    import re
-                    m = re.search(r'[?&]t=([A-Z]+)', href)
-                    if m:
-                        ticker = m.group(1)
-                        break
-            if not ticker and len(cols) >= 2:
-                # Fallback: limpiar posible letra duplicada
-                ticker = cols[1]
-            if not ticker:
+        # Procesar SOLO filas con enlace de ticker. Esto excluye cabecera y
+        # filas de paginación y, sobre todo, NO se salta la primera fila de datos
+        # (ese era el bug de position()>1, que descartaba siempre al nº1).
+        added_this_page = 0
+        for tr in tr_list:
+            ticker = ticker_from_row(tr)
+            if not ticker or ticker in seen:
                 continue
 
-            if len(cols) < 11:
-                continue
+            cols = [td.text_content().strip() for td in tr.xpath('.//td')]
+            if len(cols) <= COL["volume"]:
+                continue  # fila incompleta
 
-            company    = cols[2]
-            sector     = cols[3]
-            market_cap = cols[6]
-            price      = cols[8]
-            change     = cols[9]
-            volume     = cols[10]
-
+            seen.add(ticker)
             stocks.append({
                 "Ticker":     ticker,
-                "Company":    company,
-                "Sector":     sector,
-                "Market Cap": market_cap,
-                "Price":      price,
-                "Change%":    change,
-                "Volume":     volume,
+                "Company":    cols[COL["company"]],
+                "Sector":     cols[COL["sector"]],
+                "Market Cap": cols[COL["market_cap"]],
+                "Price":      cols[COL["price"]],
+                "Change%":    cols[COL["change"]],
+                "Volume":     cols[COL["volume"]],
             })
+            added_this_page += 1
 
         next_links = tree.xpath('//a[contains(@class,"screener-pages") and contains(text(),"next")]')
         if not next_links:
             next_links = tree.xpath('//a[@id="screener-next"]')
-        if not next_links:
+        if not next_links or added_this_page == 0:
             break
         page += 1
 
@@ -754,6 +795,7 @@ def fetch_below20_screener():
             s["ok_ipo"]   = False
             s["VolPct"]   = None
             s["VolFecha"] = None
+            s["DistSMA20"] = get_dist_sma20(ticker)
             continue
 
         price_f   = to_float(s["Price"])
@@ -793,7 +835,22 @@ def fetch_below20_screener():
         s["VolPct"]   = vol_pct
         s["VolFecha"] = vol_fecha
 
+        # ── DISTANCIA al SMA20 (negativo = por debajo de la media) ────────────
+        s["DistSMA20"] = get_dist_sma20(ticker)
+
     print(" " * 50, end="\r")  # limpiar línea de progreso
+
+    # Ordenar RESPETANDO grupos: primero las que cumplen los 5 filtros y, dentro
+    # de cada grupo, la más hundida por debajo del SMA20 arriba (más negativa).
+    def _sort_key(s):
+        cumple_todo = (s.get("ok_pb") and s.get("ok_sales") and
+                       s.get("ok_inc") and s.get("ok_idx") and s.get("ok_ipo"))
+        dist = s.get("DistSMA20")
+        dist = dist if dist is not None else 0.0  # sin dato -> al fondo de su grupo
+        # grupo 0 = cumple todo (va antes); dentro, orden ascendente por distancia
+        return (0 if cumple_todo else 1, dist)
+
+    stocks.sort(key=_sort_key)
     return stocks
 
 def market_status_info():
@@ -867,7 +924,7 @@ def print_below20_table(stocks):
     # Columnas: datos + 5 validaciones + Vol% + New?
     columns = [
         "#", "Ticker", "Company", "Sector", "Market Cap", "Price", "Change%",
-        "P/B<3", "Sales>0", "Inc>0", "Index", "IPO", "Vol%", "New?",
+        "Dist20%", "P/B<3", "Sales>0", "Inc>0", "Index", "IPO", "Vol%", "New?",
     ]
 
     # Construir filas con flag all_ok para ordenar
@@ -896,6 +953,21 @@ def print_below20_table(stocks):
         inc_text   = s.get("Income", "-")
         idx_text   = idx_val if idx_val != "-" else "-"
         ipo_text   = ipo_val if ipo_val != "-" else "-"
+
+        # Dist20% — separación del precio respecto al SMA20 (negativo = por debajo)
+        dist_val = s.get("DistSMA20")
+        if dist_val is not None:
+            dist_str = f"{dist_val:+.1f}%"
+            # más hundida = más llamativo. Por debajo -> rojo; por encima -> verde
+            if dist_val <= -20:
+                dist_color = Fore.RED
+            elif dist_val < 0:
+                dist_color = Fore.YELLOW
+            else:
+                dist_color = Fore.GREEN
+        else:
+            dist_str   = "—"
+            dist_color = ""
 
         # Vol% — siempre visible con fecha del día de caída
         vol_pct   = s.get("VolPct")
@@ -927,6 +999,7 @@ def print_below20_table(stocks):
             s["Market Cap"],
             s["Price"],
             change_str,
+            dist_str,
             pb_text,
             sales_text,
             inc_text,
@@ -937,6 +1010,7 @@ def print_below20_table(stocks):
         ]
         colors = {
             "chg":    chg_color,
+            "dist":   dist_color,
             "pb":     Fore.GREEN if ok_pb    else Fore.RED,
             "sales":  Fore.GREEN if ok_sales else Fore.RED,
             "inc":    Fore.GREEN if ok_inc   else Fore.RED,
@@ -946,21 +1020,23 @@ def print_below20_table(stocks):
             "new":    new_color,
             "all_ok": all_ok,
         }
-        entries.append((all_ok, row, colors))
+        # valor numérico de distancia para ordenar (sin dato -> al fondo del grupo)
+        dist_sort = dist_val if dist_val is not None else 0.0
+        entries.append((all_ok, row, colors, dist_sort))
 
-    # Ordenar: las que pasan todos los filtros primero, el resto por Market Cap desc
+    # Ordenar: las que pasan todos los filtros primero y, dentro de cada grupo,
+    # la MÁS separada por debajo del SMA20 arriba (distancia más negativa).
     def sort_key(entry):
-        all_ok = entry[0]
-        market_cap_str = entry[1][4]  # columna Market Cap
-        cap_val = parse_market_cap_value(market_cap_str)
-        return (not all_ok, -cap_val)
+        all_ok    = entry[0]
+        dist_sort = entry[3]  # % de distancia al SMA20 (negativo = por debajo)
+        return (not all_ok, dist_sort)
 
     entries.sort(key=sort_key)
 
     # Renumerar y asignar colores finales
     rows       = []
     row_colors = []
-    for i, (all_ok, row, colors) in enumerate(entries, 1):
+    for i, (all_ok, row, colors, _dist) in enumerate(entries, 1):
         row[0] = str(i)
         rows.append(row)
         row_colors.append(colors)
@@ -972,14 +1048,16 @@ def print_below20_table(stocks):
             widths[j] = max(widths[j], len(str(cell)))
 
     # Índices de las columnas de validación
+    # (tras insertar "Dist20%" en la posición 7, todo lo de después va +1)
     IDX_CHG   = 6
-    IDX_PB    = 7
-    IDX_SALES = 8
-    IDX_INC   = 9
-    IDX_IDX   = 10
-    IDX_IPO   = 11
-    IDX_VOL   = 12
-    IDX_NEW   = 13
+    IDX_DIST  = 7
+    IDX_PB    = 8
+    IDX_SALES = 9
+    IDX_INC   = 10
+    IDX_IDX   = 11
+    IDX_IPO   = 12
+    IDX_VOL   = 13
+    IDX_NEW   = 14
 
     VAL_COLS = {IDX_PB, IDX_SALES, IDX_INC, IDX_IDX, IDX_IPO}
     GREY = Fore.LIGHTBLACK_EX  # gris para filas que no pasan
@@ -993,7 +1071,8 @@ def print_below20_table(stocks):
         for j, c in enumerate(row):
             text = str(c).center(widths[j]) if j in VAL_COLS else str(c).ljust(widths[j])
             if all_ok:
-                if   j == IDX_CHG and colors["chg"]:  text = f"{colors['chg']}{text}{Style.RESET_ALL}"
+                if   j == IDX_CHG and colors["chg"]:   text = f"{colors['chg']}{text}{Style.RESET_ALL}"
+                elif j == IDX_DIST and colors["dist"]: text = f"{colors['dist']}{text}{Style.RESET_ALL}"
                 elif j == IDX_VOL and colors["vol"]:   text = f"{colors['vol']}{text}{Style.RESET_ALL}"
                 elif j == IDX_NEW:                     text = f"{colors['new']}{text}{Style.RESET_ALL}"
                 elif j in VAL_COLS:                    text = f"{Fore.GREEN}{text}{Style.RESET_ALL}"
@@ -1002,6 +1081,7 @@ def print_below20_table(stocks):
                 if j in VAL_COLS:
                     color_key = {IDX_PB: "pb", IDX_SALES: "sales", IDX_INC: "inc", IDX_IDX: "idx", IDX_IPO: "ipo"}[j]
                     text = f"{colors[color_key]}{text}{Style.RESET_ALL}"
+                elif j == IDX_DIST and colors["dist"]: text = f"{colors['dist']}{text}{Style.RESET_ALL}"
                 elif j == IDX_VOL and colors["vol"]:   text = f"{colors['vol']}{text}{Style.RESET_ALL}"
                 elif j == IDX_NEW:                     text = f"{colors['new']}{text}{Style.RESET_ALL}"
                 elif j == IDX_CHG and colors["chg"]:   text = f"{GREY}{text}{Style.RESET_ALL}"
