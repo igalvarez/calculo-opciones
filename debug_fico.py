@@ -1,87 +1,73 @@
 """
-debug_fico.py — Diagnostica por qué FICO no aparece en el screener del script.
-Hace la MISMA petición y el MISMO parseo que get-info-v1.py, pero vuelca
-la estructura de la fila de FICO para ver exactamente dónde se pierde.
+debug_yahoo_news.py — Ver qué devuelve yfinance.news para un ticker.
 
-Uso:  python debug_fico.py
+El formato de .news ha cambiado entre versiones de yfinance, así que esto
+nos enseña la estructura REAL en tu instalación, para integrarlo bien en el v3.
+
+Uso:  python debug_yahoo_news.py STC
+      python debug_yahoo_news.py          (STC por defecto)
 """
-import re
-import requests
-from lxml import html
+import sys
+import json
 
-URL = ("https://finviz.com/screener.ashx?v=111"
-       "&f=cap_smallover,targetprice_a50,an_recom_buybetter,ta_sma20_pb20,geo_usa"
-       "&o=-marketcap&ft=4&r=1")
+try:
+    import yfinance as yf
+except ImportError:
+    print("Falta yfinance:  pip install yfinance")
+    sys.exit(1)
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-    "Referer": "https://finviz.com/",
-}
+ticker = (sys.argv[1] if len(sys.argv) > 1 else "STC").upper()
 
+print("yfinance version:", getattr(yf, "__version__", "desconocida"))
+print(f"Pidiendo noticias de {ticker} a Yahoo...\n")
 
-def extract_ticker(row):
-    """Misma lógica que el script: saca el ticker del primer href con t=."""
-    for a in row.xpath('.//a[@href]'):
-        href = a.get("href", "")
-        if "t=" in href:
-            m = re.search(r'[?&]t=([A-Za-z.\-]+)', href)  # permite . y - por si acaso
-            if m:
-                return m.group(1)
-    return ""
+t = yf.Ticker(ticker)
 
+# 1) Intentar el atributo clásico .news
+news = None
+try:
+    news = t.news
+except Exception as e:
+    print("t.news falló:", e)
 
-def main():
-    r = requests.Session().get(URL, headers=HEADERS, timeout=20)
-    print("HTTP:", r.status_code, "| bytes:", len(r.content))
+# 2) Algunas versiones nuevas usan get_news()
+if not news:
+    try:
+        news = t.get_news()
+    except Exception as e:
+        print("t.get_news() falló:", e)
 
-    tree = html.fromstring(r.content)
+if not news:
+    print("No devolvió noticias (lista vacía o None).")
+    sys.exit(0)
 
-    # Mismo xpath que el script (con el mismo fallback)
-    rows = tree.xpath('//table[contains(@class,"screener_table")]//tr[position()>1]')
-    if not rows:
-        rows = tree.xpath('//tr[@class="table-light-row-cp" or @class="table-dark-row-cp"]')
-    print("Filas que ve el xpath:", len(rows))
-    print("-" * 72)
+print("Nº de noticias devueltas:", len(news))
+print("=" * 78)
 
-    # Cabecera real (para ver el mapeo verdadero de columnas de v=111)
-    header = tree.xpath('//table[contains(@class,"screener_table")]//tr[1]//td')
-    if header:
-        print("CABECERA:", [c.text_content().strip() for c in header])
-        print("-" * 72)
+# Volcar la PRIMERA noticia completa (estructura cruda) para ver las claves
+print("ESTRUCTURA de la primera noticia (JSON crudo):")
+print(json.dumps(news[0], indent=2, default=str)[:2000])
+print("=" * 78)
 
-    # Resumen: ticker + nº de columnas de cada fila (así se ve si FICO descuadra)
-    for i, row in enumerate(rows):
-        n = len(row.xpath('.//td'))
-        t = extract_ticker(row)
-        flag = "  <-- FICO" if t.upper() == "FICO" else ""
-        print(f"[{i:2}] {t:8} ncols={n}{flag}")
+# Intento de extracción "inteligente": el formato nuevo mete todo bajo 'content'
+print("\nResumen de las primeras 8 (intento de extracción):")
+import datetime
+for i, item in enumerate(news[:8]):
+    # Formato viejo: claves planas.  Formato nuevo: dentro de item['content']
+    c = item.get("content", item)
+    title = c.get("title") or item.get("title") or "(sin título)"
+    # fecha: puede venir como pubDate (nuevo) o providerPublishTime epoch (viejo)
+    pub = c.get("pubDate") or c.get("displayTime")
+    if not pub and item.get("providerPublishTime"):
+        pub = datetime.datetime.fromtimestamp(item["providerPublishTime"]).isoformat()
+    # fuente
+    prov = ""
+    if isinstance(c.get("provider"), dict):
+        prov = c["provider"].get("displayName", "")
+    prov = prov or item.get("publisher", "")
+    print(f"[{i}] {str(pub):25} | {prov:20} | {str(title)[:70]}")
 
-    # Detalle celda a celda de FICO y de un vecino "normal" (GEN)
-    for target in ("FICO", "GEN"):
-        print("=" * 72)
-        print("DETALLE:", target)
-        found = False
-        for row in rows:
-            if extract_ticker(row).upper() == target:
-                found = True
-                cols = [td.text_content().strip() for td in row.xpath('.//td')]
-                for j, c in enumerate(cols):
-                    print(f"  cols[{j}] = {c!r}")
-                # Simular lo que hace el script:
-                if len(cols) < 11:
-                    print(f"  >>> len(cols)={len(cols)} < 11  =>  el script hace 'continue' "
-                          f"y DESCARTA {target}")
-                else:
-                    print(f"  >>> market_cap = cols[6] = {cols[6]!r}   "
-                          f"price = cols[8] = {cols[8]!r}   volume = cols[10] = {cols[10]!r}")
-                break
-        if not found:
-            print(f"  {target} NO está entre las filas del xpath "
-                  f"(su <tr> no coincide con el selector).")
-
-
-if __name__ == "__main__":
-    main()
+print("=" * 78)
+print("\nQué mirar:")
+print("  - ¿La fecha de [0] es de hoy/ayer? -> Yahoo SÍ trae noticias recientes.")
+print("  - Fíjate si los datos están planos o dentro de 'content' (define cómo parsear).")
