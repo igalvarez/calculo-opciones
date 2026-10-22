@@ -37,6 +37,75 @@ from colorama import init, Fore, Style
 
 init(autoreset=True)
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  CONFIGURACIÓN --below20 / --exp20   (EDITA AQUÍ LOS FILTROS)
+# ══════════════════════════════════════════════════════════════════════════════
+# ── 1) Filtros que aplica FINVIZ en la URL del screener ──────────────────────
+#    Códigos de Finviz. Si un código no existe, Finviz lo ignora sin dar error.
+B20_FINVIZ_FILTERS = [
+    "cap_smallover",       # Market Cap > 300M (cap_microover = >50M)
+    "targetprice_a50",     # Target Price >= 50% por encima del precio
+    "an_recom_buybetter",  # Recomendación analistas: Buy o mejor
+    "ta_sma20_pb20",       # Precio >= 20% por debajo del SMA20
+    "geo_usa",             # País: USA
+]
+B20_FINVIZ_ORDER = "-marketcap"     # Orden del screener (mayor Market Cap primero)
+
+# ── 2) Filtros locales EXCLUYENTES (la acción desaparece de la tabla) ────────
+B20_MIN_MARKET_CAP_M = 500          # Market Cap mínimo, en millones (>=)
+B20_SECTORS = {                     # Sectores permitidos (minúsculas).
+    "technology",                   # set() vacío = TODOS los sectores.
+    "energy",
+    "communication services",
+    "consumer cyclical",
+}
+
+# ── 3) Filtros locales de VALIDACIÓN (si falla -> grupo gris, no se elimina) ─
+B20_MAX_PB        = 3.0             # P/B  <  valor
+B20_MIN_SALES     = 0               # Sales  >  valor
+B20_MIN_INCOME    = 0               # Income >  valor
+B20_REQUIRE_INDEX = True            # True = debe cotizar en algún índice
+B20_INDEX_EXCLUDE = True            # True  = ELIMINA del listado las que no
+                                    #         cotizan en ningún índice
+                                    # False = se muestran (en gris si no cumplen)
+B20_MIN_IPO_YEARS = 2               # IPO hace al menos N años (>=)
+
+# ── 4) Diagnóstico ───────────────────────────────────────────────────────────
+B20_DEBUG = False                   # True = muestra URL, HTTP, filas por página
+
+# ── 5) Filtro de TENDENCIA en temporalidad DIARIA (D) ────────────────────────
+#    Se evalúa en la vela diaria ANTERIOR al día de referencia.
+B20_TREND_FILTER   = True           # True = activar filtro de tendencia D
+B20_TREND_EXCLUDE  = False           # True = elimina las que no cumplen
+                                    # False = solo las marca (columna "Tend D")
+B20_TREND_REF      = "caida"        # "caida"  = día de mayor caída (Close vs Close
+                                    #            anterior) en los últimos N días
+                                    # "ultimo" = última vela diaria cerrada
+B20_TREND_LOOKBACK = 10             # N días hábiles para buscar el día de caída
+# Regla de tendencia (tu metodología: comparar DENTRO de cada par)
+B20_TREND_PAIR_20_40   = True       # exige MA20 > MA40
+B20_TREND_PAIR_100_200 = True       # exige MA100 > MA200
+B20_TREND_FULL_ORDER   = False      # True = exige además 20>40>100>200
+B20_TREND_SLOPE_DAYS   = 0          # >0 = exige que las 4 medias SUBAN respecto
+                                    # a N días antes (0 = no se exige pendiente)
+# Ventana de tendencia ANTES de la caída (temporalidad D)
+B20_TREND_WINDOW_DAYS = 21          # velas D a revisar: 1 = solo la vela previa
+                                    # 21 ≈ 1 mes | 42 ≈ 2 meses
+B20_TREND_MIN_PCT     = 100         # % de velas de la ventana que deben cumplir
+                                    # 100 = TODAS | 80 = tolera algún día suelto
+
+# Colores columna "Tend D": verde = cumple | amarillo = n_ok >= este valor
+# (sin llegar a cumplir) | gris = por debajo
+B20_TREND_YELLOW_MIN  = 10
+
+# ── 6) Columna VolCaida (INFORMATIVA, no filtra) ─────────────────────────────
+#    Día de caída = mismo que "Tend D" (mayor caída Close vs Close anterior en
+#    los últimos B20_TREND_LOOKBACK días). Cumple si la vela es roja
+#    (Close < Close anterior) y su volumen > media de los N días ANTERIORES x factor.
+B20_VOLCAIDA_BASE   = 20            # días previos para la media de volumen
+B20_VOLCAIDA_FACTOR = 1.0           # 1.0 = superior a la media | 1.5 | 2.0
+# ══════════════════════════════════════════════════════════════════════════════
+
 
 # ─── CACHÉ ────────────────────────────────────────────────────────────────────
 
@@ -152,6 +221,117 @@ def get_sma_distances(ticker):
             if sma200:
                 out["dist200"] = ((price - sma200) / sma200) * 100
 
+        return out
+    except Exception:
+        return out
+
+
+def get_daily_trend(ticker):
+    """
+    Tendencia en temporalidad DIARIA con MA20/40/100/200 (simples, sobre Close)
+    evaluada en la vela ANTERIOR al día de referencia (B20_TREND_REF).
+    Devuelve dict: {"ok": bool|None, "ref": "dd/mm", "eval": "dd/mm", "txt": str}
+    ok=None -> sin datos suficientes (menos de 200 velas antes del día).
+    """
+    out = {"ok": None, "ref": "", "eval": "", "txt": "n/d"}
+    try:
+        import yfinance as yf
+        df = yf.download(ticker, period="2y", interval="1d",
+                         progress=False, auto_adjust=True)
+        if df is None or len(df) == 0:
+            return out
+        if hasattr(df.columns, "levels"):
+            df.columns = df.columns.get_level_values(0)
+        df = df.dropna(subset=["Close"])
+        close = df["Close"]
+        n = len(close)
+        if n < 3:
+            return out
+
+        # Día de referencia
+        if B20_TREND_REF == "ultimo":
+            ref_pos = n - 1
+        else:
+            chg = close.pct_change()
+            ventana = chg.iloc[-B20_TREND_LOOKBACK:]
+            ref_pos = close.index.get_loc(ventana.idxmin())
+        eval_pos = ref_pos - 1                     # vela anterior al día
+        out["ref"]  = close.index[ref_pos].strftime("%d/%m")
+        out["eval"] = close.index[eval_pos].strftime("%d/%m")
+
+        win  = max(1, int(B20_TREND_WINDOW_DAYS))
+        need = 200 + max(0, B20_TREND_SLOPE_DAYS) + (win - 1)
+        if eval_pos + 1 < need:
+            out["txt"] = f"n/d (<{need}v)"
+            return out
+
+        ma = {p: close.rolling(p).mean() for p in (20, 40, 100, 200)}
+
+        def cumple(pos):
+            v = {p: float(ma[p].iloc[pos]) for p in ma}
+            checks = []
+            if B20_TREND_PAIR_20_40:
+                checks.append(v[20] > v[40])
+            if B20_TREND_PAIR_100_200:
+                checks.append(v[100] > v[200])
+            if B20_TREND_FULL_ORDER:
+                checks.append(v[20] > v[40] > v[100] > v[200])
+            if B20_TREND_SLOPE_DAYS > 0:
+                k = B20_TREND_SLOPE_DAYS
+                checks.append(all(v[p] > float(ma[p].iloc[pos - k]) for p in ma))
+            return all(checks) if checks else True
+
+        # Revisar todas las velas D de la ventana: [eval_pos - win + 1, eval_pos]
+        ini = eval_pos - win + 1
+        oks = [cumple(pos) for pos in range(ini, eval_pos + 1)]
+        n_ok = sum(oks)
+        pct  = 100.0 * n_ok / win
+        ok   = pct >= B20_TREND_MIN_PCT and oks[-1]   # la vela previa SIEMPRE debe cumplir
+        out["ok"]   = ok
+        out["n_ok"] = n_ok
+        out["desde"] = close.index[ini].strftime("%d/%m")
+        out["txt"]  = (("✓ " if ok else "✗ ")
+                       + f"{n_ok}/{win} ({out['desde']}-{out['eval']})")
+        return out
+    except Exception:
+        return out
+
+
+def get_vol_caida(ticker):
+    """
+    Volumen del DÍA DE CAÍDA (mismo día que usa Tend D) frente a la media de
+    volumen de los B20_VOLCAIDA_BASE días anteriores (sin incluir ese día).
+    Devuelve dict: {"ok": bool|None, "txt": str}  (ok=None -> sin datos)
+    """
+    out = {"ok": None, "txt": "n/d"}
+    try:
+        import yfinance as yf
+        df = yf.download(ticker, period="6mo", interval="1d",
+                         progress=False, auto_adjust=True)
+        if df is None or len(df) == 0:
+            return out
+        if hasattr(df.columns, "levels"):
+            df.columns = df.columns.get_level_values(0)
+        df = df.dropna(subset=["Close", "Volume"])
+        close, vol = df["Close"], df["Volume"]
+        if len(close) < 3:
+            return out
+        chg = close.pct_change()
+        ventana = chg.iloc[-B20_TREND_LOOKBACK:]
+        pos = close.index.get_loc(ventana.idxmin())
+        fecha = close.index[pos].strftime("%d/%m")
+        previos = vol.iloc[max(0, pos - B20_VOLCAIDA_BASE):pos]
+        if len(previos) < 3:
+            return out
+        avg = float(previos.mean())
+        if avg == 0:
+            return out
+        v = float(vol.iloc[pos])
+        roja = float(close.iloc[pos]) < float(close.iloc[pos - 1])
+        pct = (v - avg) / avg * 100
+        ok = roja and v > avg * B20_VOLCAIDA_FACTOR
+        out["ok"] = ok
+        out["txt"] = ("✓ " if ok else "✗ ") + f"{pct:+.0f}% ({fecha})" + ("" if roja else " verde")
         return out
     except Exception:
         return out
@@ -912,6 +1092,30 @@ def parse_finviz_number(val):
     except ValueError:
         return None
 
+def fetch_quote_snapshot(ticker):
+    """Devuelve la tabla snapshot completa de la página quote de Finviz (dict)."""
+    from lxml import html as lxml_html
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://finviz.com/",
+    }
+    data = {}
+    try:
+        r = requests.get(f"https://finviz.com/quote.ashx?t={ticker.upper()}&p=d",
+                         headers=headers, timeout=15)
+        tree = lxml_html.fromstring(r.content)
+        for tr in tree.xpath('//table[contains(@class,"snapshot-table2")]//tr'):
+            tds = tr.xpath('.//td')
+            for i in range(0, len(tds) - 1, 2):
+                k = tds[i].text_content().strip()
+                if k:
+                    data[k] = tds[i + 1].text_content().strip()
+    except Exception:
+        pass
+    return data
+
+
 def fetch_below20_screener():
     """
     Consulta el screener de Finviz con los filtros:
@@ -927,13 +1131,15 @@ def fetch_below20_screener():
     import time
     import re
 
-    url = (
-        "https://finviz.com/screener.ashx"
-        "?v=111"
-        "&f=cap_smallover,targetprice_a50,an_recom_buybetter,ta_sma20_pb20,geo_usa"
-        "&o=-marketcap"
-        "&ft=4"
-    )
+    query = ("?v=111"
+             "&f=" + ",".join(B20_FINVIZ_FILTERS) +
+             "&o=" + B20_FINVIZ_ORDER +
+             "&ft=4")
+    # Finviz ha migrado a /screener/stocks; se mantiene el antiguo como respaldo.
+    url_candidates = [
+        "https://finviz.com/screener/stocks" + query,
+        "https://finviz.com/screener.ashx" + query,
+    ]
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -960,81 +1166,246 @@ def fetch_below20_screener():
                     return m.group(1).upper()
         return None
 
-    stocks = []
-    seen   = set()
-    page   = 1
+    def header_map(tree):
+        """Localiza la fila de cabecera (No./Ticker/.../Volume) y devuelve
+        {nombre_columna: índice}. Si no la encuentra, usa el orden fijo COL."""
+        for tr in tree.xpath('//tr'):
+            cells = [c.text_content().strip().lower() for c in tr.xpath('./th|./td')]
+            if "ticker" in cells and "market cap" in cells and "price" in cells:
+                def idx(name, default):
+                    return cells.index(name) if name in cells else default
+                return {
+                    "ticker": idx("ticker", COL["ticker"]),
+                    "company": idx("company", COL["company"]),
+                    "sector": idx("sector", COL["sector"]),
+                    "market_cap": idx("market cap", COL["market_cap"]),
+                    "price": idx("price", COL["price"]),
+                    "change": idx("change", COL["change"]),
+                    "volume": idx("volume", COL["volume"]),
+                }
+        return dict(COL)
 
+    def total_from_page(tree):
+        """Lee '#1 / 37 Total' de la página. None si no aparece."""
+        txt = " ".join(tree.xpath('//*[@id="screener-total"]//text()'))
+        if not txt:
+            txt = " ".join(tree.xpath('//*[contains(text(),"Total")]/text()'))
+        m = re.search(r'/\s*([\d,]+)\s*Total', txt)
+        return int(m.group(1).replace(",", "")) if m else None
+
+    # ── Parser del screener nuevo de Finviz (React/SSR) ─────────────────────
+    # La página ya no trae <tr>: las filas vienen como objetos JSON con
+    # "ticker":"XXX" dentro de un <script>. Se extrae cada objeto completo y se
+    # mapean sus claves por nombre. Si falta algún campo se completa después.
+    import json as _json
+
+    def _enclosing_object(text, pos):
+        """Devuelve el objeto JSON {...} más interno que contiene la posición pos."""
+        depth, i = 0, pos
+        while i >= 0:                      # retroceder hasta la '{' que abre
+            ch = text[i]
+            if ch == '}':
+                depth += 1
+            elif ch == '{':
+                if depth == 0:
+                    break
+                depth -= 1
+            i -= 1
+        if i < 0:
+            return None
+        start, depth, in_str, esc = i, 0, False, False
+        for j in range(start, len(text)):  # avanzar hasta la '}' que cierra
+            ch = text[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == '\\':
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return _json.loads(text[start:j + 1])
+                    except Exception:
+                        return None
+        return None
+
+    def _pick(obj, *names):
+        """Busca una clave por nombre, sin distinguir mayúsculas ni '_'/' '."""
+        norm = {re.sub(r'[^a-z0-9]', '', str(k).lower()): v for k, v in obj.items()}
+        for n in names:
+            v = norm.get(re.sub(r'[^a-z0-9]', '', n.lower()))
+            if v not in (None, ""):
+                return v
+        return None
+
+    def _fmt_cap(v):
+        """Market Cap a texto tipo Finviz ('1.23B', '487.51M')."""
+        if isinstance(v, (int, float)):
+            m = float(v)
+            if m > 1e6:            # viene en unidades -> pasar a millones
+                m = m / 1e6
+            return f"{m/1000:.2f}B" if m >= 1000 else f"{m:.2f}M"
+        return str(v)
+
+    def _fmt_chg(v):
+        if isinstance(v, (int, float)):
+            pct = v * 100 if abs(v) < 1 else v
+            return f"{pct:.2f}%"
+        return str(v)
+
+    def rows_from_json(text):
+        out = []
+        for m in re.finditer(r'"ticker"\s*:\s*"([A-Za-z0-9.\-]+)"', text):
+            obj = _enclosing_object(text, m.start())
+            if not isinstance(obj, dict):
+                obj = {}
+            out.append((m.group(1).upper(), obj))
+        return out
+
+    def rows_from_links(text):
+        return [(t.upper(), {}) for t in re.findall(r'/quote\?t=([A-Za-z0-9.\-]+)', text)]
+
+    stocks  = []
+    seen    = set()
+    session = requests.Session()
+    debug_keys_shown = False
+
+    # Elegir la URL que responda (URL nueva primero, antigua como respaldo)
+    url = None
+    for cand in url_candidates:
+        try:
+            r = session.get(cand + "&r=1", headers=headers, timeout=20)
+            if B20_DEBUG:
+                print(f"  [debug] {cand}&r=1 -> HTTP {r.status_code}, {len(r.content)} bytes")
+            if r.status_code == 200 and ("/quote?t=" in r.text or "quote.ashx?t=" in r.text
+                                         or '"ticker"' in r.text):
+                url = cand
+                break
+        except Exception as e:
+            if B20_DEBUG:
+                print(f"  [debug] {cand} -> {e}")
+    if url is None:
+        print(f"  {Fore.RED}Finviz no ha devuelto la página del screener "
+              f"(posible bloqueo 403/429 o cambio de URL). Activa B20_DEBUG=True.{Style.RESET_ALL}")
+        return []
+
+    total_finviz = None
+    page = 1
     while True:
         paged_url = url + f"&r={1 + (page - 1) * 20}"
         try:
-            resp = requests.Session().get(paged_url, headers=headers, timeout=20)
+            resp = session.get(paged_url, headers=headers, timeout=20)
             resp.raise_for_status()
         except Exception as e:
             print(f"  {Fore.RED}Error al conectar con Finviz: {e}{Style.RESET_ALL}")
             break
 
+        text = resp.text
         tree = lxml_html.fromstring(resp.content)
+        if total_finviz is None:
+            total_finviz = total_from_page(tree)
+            if total_finviz is None:
+                mt = re.search(r'"(?:totalCount|total|count)"\s*:\s*(\d+)', text)
+                total_finviz = int(mt.group(1)) if mt else None
 
-        # Acotar a la tabla de resultados (evita pescar tickers de otros widgets).
-        # Fallback por clase de fila si cambiara la clase de la tabla.
-        table = tree.xpath('//table[contains(@class,"screener_table")]')
-        if table:
-            tr_list = table[0].xpath('.//tr')
-        else:
-            tr_list = tree.xpath('//tr[@class="table-light-row-cp" or @class="table-dark-row-cp"]')
-        if not tr_list:
-            break
+        # 1º JSON embebido; 2º enlaces /quote?t= ; 3º tabla HTML clásica
+        candidates = rows_from_json(text) or rows_from_links(text)
+        if not candidates:
+            cmap = header_map(tree)
+            need = max(cmap.values())
+            for tr in tree.xpath('//tr'):
+                tds = tr.xpath('./td')
+                if len(tds) <= need:
+                    continue
+                t = ticker_from_row(tds[cmap["ticker"]]) or ticker_from_row(tr)
+                if t:
+                    cols = [td.text_content().strip() for td in tds]
+                    candidates.append((t, {
+                        "company": cols[cmap["company"]], "sector": cols[cmap["sector"]],
+                        "marketCap": cols[cmap["market_cap"]], "price": cols[cmap["price"]],
+                        "change": cols[cmap["change"]], "volume": cols[cmap["volume"]],
+                    }))
 
-        # Procesar SOLO filas con enlace de ticker. Esto excluye cabecera y
-        # filas de paginación y, sobre todo, NO se salta la primera fila de datos
-        # (ese era el bug de position()>1, que descartaba siempre al nº1).
         added_this_page = 0
-        for tr in tr_list:
-            ticker = ticker_from_row(tr)
-            if not ticker or ticker in seen:
+        for ticker, obj in candidates:
+            if ticker in seen:
                 continue
-
-            cols = [td.text_content().strip() for td in tr.xpath('.//td')]
-            if len(cols) <= COL["volume"]:
-                continue  # fila incompleta
-
+            if B20_DEBUG and obj and not debug_keys_shown:
+                print(f"  [debug] claves JSON de {ticker}: {list(obj.keys())}")
+                debug_keys_shown = True
             seen.add(ticker)
+            cap = _pick(obj, "marketCap", "market_cap", "Market Cap", "mktCap")
+            chg = _pick(obj, "change", "changePct", "change%", "Change", "perfDay")
             stocks.append({
                 "Ticker":     ticker,
-                "Company":    cols[COL["company"]],
-                "Sector":     cols[COL["sector"]],
-                "Market Cap": cols[COL["market_cap"]],
-                "Price":      cols[COL["price"]],
-                "Change%":    cols[COL["change"]],
-                "Volume":     cols[COL["volume"]],
+                "Company":    str(_pick(obj, "company", "companyName", "name") or ""),
+                "Sector":     str(_pick(obj, "sector", "Sector") or ""),
+                "Market Cap": _fmt_cap(cap) if cap is not None else "",
+                "Price":      str(_pick(obj, "price", "close", "last", "Price") or ""),
+                "Change%":    _fmt_chg(chg) if chg is not None else "",
+                "Volume":     str(_pick(obj, "volume", "Volume") or ""),
             })
             added_this_page += 1
 
-        next_links = tree.xpath('//a[contains(@class,"screener-pages") and contains(text(),"next")]')
-        if not next_links:
-            next_links = tree.xpath('//a[@id="screener-next"]')
-        if not next_links or added_this_page == 0:
+        if B20_DEBUG:
+            print(f"  [debug] página {page}: {added_this_page} filas (Total Finviz: {total_finviz})")
+
+        if added_this_page == 0:
+            break
+        if total_finviz is not None and len(stocks) >= total_finviz:
+            break
+        if total_finviz is None and added_this_page < 20:
             break
         page += 1
 
-    # Filtro 1: Market Cap >=500M
+    # ── Completar campos que no vengan en el JSON (quote de Finviz / yfinance)
+    faltan = [s for s in stocks if not (s["Sector"] and s["Market Cap"] and s["Price"])]
+    if faltan:
+        print(f"  Completando datos de {len(faltan)} ticker(s)...")
+    for s in faltan:
+        snap = fetch_quote_snapshot(s["Ticker"])
+        s["Market Cap"] = s["Market Cap"] or snap.get("Market Cap", "")
+        s["Price"]      = s["Price"]      or snap.get("Price", "")
+        s["Change%"]    = s["Change%"]    or snap.get("Change", "")
+        s["Volume"]     = s["Volume"]     or snap.get("Volume", "")
+        if not s["Sector"] or not s["Company"]:
+            try:
+                import yfinance as yf
+                info = yf.Ticker(s["Ticker"]).info or {}
+                s["Sector"]  = s["Sector"]  or info.get("sector", "")
+                s["Company"] = s["Company"] or info.get("shortName", "")
+            except Exception:
+                pass
+
+    n_finviz = len(stocks)
+    if total_finviz is not None and n_finviz != total_finviz:
+        print(f"  {Fore.YELLOW}Aviso: Finviz indica {total_finviz} y se han leído {n_finviz}.{Style.RESET_ALL}")
+
+    # Filtro 1: Market Cap >= B20_MIN_MARKET_CAP_M
     stocks = [
         s for s in stocks
-        if parse_market_cap_value(s["Market Cap"]) >= 500
+        if parse_market_cap_value(s["Market Cap"]) >= B20_MIN_MARKET_CAP_M
     ]
+    n_cap = len(stocks)
 
     # Filtro 2: limitar el screener a los sectores seleccionados.
     # Se aplica fuera del bucle de paginacion para filtrar el resultado completo.
-    allowed_sectors = {
-        "technology",
-        "energy",
-        "communication services",
-        "consumer cyclical",
-    }
-    stocks = [
-        s for s in stocks
-        if s.get("Sector", "").strip().casefold() in allowed_sectors
-    ]
+    allowed_sectors = {x.strip().casefold() for x in B20_SECTORS}
+    if allowed_sectors:
+        stocks = [
+            s for s in stocks
+            if s.get("Sector", "").strip().casefold() in allowed_sectors
+        ]
+    print(f"  Finviz: {n_finviz} | tras Market Cap>={B20_MIN_MARKET_CAP_M}M: {n_cap} "
+          f"| tras sectores: {len(stocks)}")
 
     # Filtros adicionales por ticker (llamada extra a cada quote, silencioso)
     total = len(stocks)
@@ -1077,7 +1448,7 @@ def fetch_below20_screener():
         if ipo_raw and ipo_raw not in ("-", "N/A", ""):
             try:
                 ipo_date = datetime.datetime.strptime(ipo_raw, "%b %d, %Y").date()
-                cutoff   = datetime.date.today() - datetime.timedelta(days=730)
+                cutoff   = datetime.date.today() - datetime.timedelta(days=int(round(365.25 * B20_MIN_IPO_YEARS)))
                 ipo_ok   = ipo_date <= cutoff
             except ValueError:
                 pass
@@ -1089,16 +1460,15 @@ def fetch_below20_screener():
         s["Income"]   = details["Income"]
         s["Index"]    = index_val if (index_val and index_val not in ("-", "N/A")) else "-"
         s["IPO"]      = ipo_raw if ipo_raw and ipo_raw not in ("-", "N/A") else "-"
-        s["ok_pb"]    = pb is not None and pb < 3
-        s["ok_sales"] = sales_f is not None and sales_f > 0
-        s["ok_inc"]   = income_f is not None and income_f > 0
-        s["ok_idx"]   = bool(index_val) and index_val not in ("-", "N/A")
+        s["ok_pb"]    = pb is not None and pb < B20_MAX_PB
+        s["ok_sales"] = sales_f is not None and sales_f > B20_MIN_SALES
+        s["ok_inc"]   = income_f is not None and income_f > B20_MIN_INCOME
+        s["ok_idx"]   = (not B20_REQUIRE_INDEX) or (bool(index_val) and index_val not in ("-", "N/A"))
         s["ok_ipo"]   = ipo_ok
 
-        # ── VOLUMEN: día de mayor caída en últimos 10 días via yfinance ───────
-        vol_pct, vol_fecha = get_caida_vol_pct(ticker)
-        s["VolPct"]   = vol_pct
-        s["VolFecha"] = vol_fecha
+        # Vol% eliminado: ya no se descarga (ver columna VolCaida)
+        s["VolPct"]   = None
+        s["VolFecha"] = None
 
         # ── DISTANCIA al SMA20 y SMA200 (una sola descarga de yfinance) ───────
         _sma = get_sma_distances(ticker)
@@ -1106,6 +1476,39 @@ def fetch_below20_screener():
         s["DistSMA200"] = _sma["dist200"]
 
     print(" " * 50, end="\r")  # limpiar línea de progreso
+
+    # ── Excluir las que no cotizan en ningún índice (B20_INDEX_EXCLUDE) ─────
+    if B20_INDEX_EXCLUDE:
+        n_antes = len(stocks)
+        stocks = [s for s in stocks if s.get("Index", "-") not in ("", "-", "N/A")]
+        print(f"  Index (excluye sin índice): {n_antes} -> {len(stocks)}")
+
+    # ── Filtro de TENDENCIA DIARIA (MA20/40/100/200) ─────────────────────────
+    if B20_TREND_FILTER:
+        total = len(stocks)
+        for i, s in enumerate(stocks, 1):
+            print(f"  Tendencia D {s['Ticker']} ({i}/{total})...", end="\r")
+            tr = get_daily_trend(s["Ticker"])
+            s["TrendOK"]  = tr["ok"]
+            s["TrendTxt"] = tr["txt"]
+            s["TrendNOK"] = tr.get("n_ok")
+        print(" " * 50, end="\r")
+        n_antes = len(stocks)
+        if B20_TREND_EXCLUDE:
+            stocks = [s for s in stocks if s.get("TrendOK") is True]
+        print(f"  Tendencia D ({B20_TREND_WINDOW_DAYS} velas antes de '{B20_TREND_REF}', "
+              f"mín {B20_TREND_MIN_PCT}%): "
+              f"{n_antes} -> {len(stocks)}"
+              + ("" if B20_TREND_EXCLUDE else " (solo marcado, no excluye)"))
+
+    # ── Columna VolCaida (informativa, no filtra) ───────────────────────────
+    total = len(stocks)
+    for i, s in enumerate(stocks, 1):
+        print(f"  VolCaida {s['Ticker']} ({i}/{total})...", end="\r")
+        vc = get_vol_caida(s["Ticker"])
+        s["VolCaidaOK"]  = vc["ok"]
+        s["VolCaidaTxt"] = vc["txt"]
+    print(" " * 50, end="\r")
 
     # Ordenar RESPETANDO grupos: primero las que cumplen los 5 filtros y, dentro
     # de cada grupo, la más hundida por debajo del SMA20 arriba (más negativa).
@@ -1162,15 +1565,17 @@ def market_status_info():
 
 def print_below20_table(stocks):
     ts_str, status, s_color = market_status_info()
-    print(f"\n{Fore.CYAN}Screener: Market Cap >500M | Target +50% | Analyst Buy+ | Price 20% below SMA20 | USA{Style.RESET_ALL}")
+    sect_txt = ", ".join(sorted(B20_SECTORS)) if B20_SECTORS else "todos"
+    print(f"\n{Fore.CYAN}Screener Finviz: {', '.join(B20_FINVIZ_FILTERS)}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}Filtros locales: Market Cap >={B20_MIN_MARKET_CAP_M}M | Sectores: {sect_txt}{Style.RESET_ALL}")
     print(f"  Consulta : {ts_str}")
     print(f"  Mercado  : {s_color}{status}{Style.RESET_ALL}")
     print(f"\n  {Fore.YELLOW}Filtros post-screener:{Style.RESET_ALL}")
-    print(f"    P/B<3      Precio no mayor de 3x el valor en libros")
-    print(f"    Sales>0    Ventas positivas")
-    print(f"    Income>0   Beneficio neto positivo")
-    print(f"    Index      Cotiza en algún índice (S&P500, RUT, NDX...)")
-    print(f"    IPO>=2y    IPO hace mínimo 2 años")
+    print(f"    {'P/B<' + format(B20_MAX_PB, 'g'):<10} Precio no mayor de {B20_MAX_PB:g}x el valor en libros")
+    print(f"    {'Sales>' + format(B20_MIN_SALES, 'g'):<10} Ventas por encima de {B20_MIN_SALES:g}")
+    print(f"    {'Income>' + format(B20_MIN_INCOME, 'g'):<10} Beneficio neto por encima de {B20_MIN_INCOME:g}")
+    print(f"    {'Index':<10} " + ("Cotiza en algún índice (S&P500, RUT, NDX...)" if B20_REQUIRE_INDEX else "No exigido"))
+    print(f"    {'IPO>=' + format(B20_MIN_IPO_YEARS, 'g') + 'y':<10} IPO hace mínimo {B20_MIN_IPO_YEARS:g} años")
 
     if not stocks:
         print(f"\n  {Fore.YELLOW}No se encontraron resultados.{Style.RESET_ALL}")
@@ -1190,8 +1595,8 @@ def print_below20_table(stocks):
 
     # Columnas: datos + 5 validaciones + Vol% + New?
     columns = [
-        "#", "Ticker", "Company", "Sector", "Market Cap", "Price", "Change%",
-        "Dist20%", "Tend", "P/B<3", "Sales>0", "Inc>0", "Index", "IPO", "Vol%", "New?",
+        "#", "Ticker", "Company", "Sector", "Market Cap", "Price",
+        "Dist20%", f"P/B<{B20_MAX_PB:g}", f"Sales>{B20_MIN_SALES:g}", f"Inc>{B20_MIN_INCOME:g}", "Index", "IPO", "New?", "Tend D", "VolCaida",
     ]
 
     # Construir filas con flag all_ok para ordenar
@@ -1280,16 +1685,15 @@ def print_below20_table(stocks):
             s["Sector"][:15],
             s["Market Cap"],
             s["Price"],
-            change_str,
             dist_str,
-            tend_str,
             pb_text,
             sales_text,
             inc_text,
             idx_text,
             ipo_text,
-            vol_str,
             new_str,
+            s.get("TrendTxt", "-"),
+            s.get("VolCaidaTxt", "-"),
         ]
         colors = {
             "chg":    chg_color,
@@ -1302,6 +1706,11 @@ def print_below20_table(stocks):
             "ipo":    Fore.GREEN if ok_ipo   else Fore.RED,
             "vol":    vol_color,
             "new":    new_color,
+            "trd":    (Fore.GREEN if s.get("TrendOK") is True
+                       else Fore.YELLOW if (s.get("TrendNOK") or 0) >= B20_TREND_YELLOW_MIN
+                       else Fore.LIGHTBLACK_EX if s.get("TrendNOK") is not None else ""),
+            "volc":   (Fore.GREEN if s.get("VolCaidaOK") is True
+                       else Fore.RED if s.get("VolCaidaOK") is False else ""),
             "all_ok": all_ok,
         }
         # valor numérico de distancia para ordenar (sin dato -> al fondo del grupo)
@@ -1333,16 +1742,18 @@ def print_below20_table(stocks):
 
     # Índices de las columnas de validación
     # (tras insertar "Dist20%" en 7 y "Tend" en 8, todo lo de después va +1)
-    IDX_CHG   = 6
-    IDX_DIST  = 7
-    IDX_TEND  = 8
-    IDX_PB    = 9
-    IDX_SALES = 10
-    IDX_INC   = 11
-    IDX_IDX   = 12
-    IDX_IPO   = 13
-    IDX_VOL   = 14
-    IDX_NEW   = 15
+    IDX_CHG   = -1   # columna Change% eliminada
+    IDX_DIST  = 6
+    IDX_TEND  = -1   # columna Tend eliminada
+    IDX_PB    = 7
+    IDX_SALES = 8
+    IDX_INC   = 9
+    IDX_IDX   = 10
+    IDX_IPO   = 11
+    IDX_VOL   = -1   # columna Vol% eliminada
+    IDX_NEW   = 12
+    IDX_TRD   = 13
+    IDX_VOLC  = 14
 
     VAL_COLS = {IDX_PB, IDX_SALES, IDX_INC, IDX_IDX, IDX_IPO}
     GREY = Fore.LIGHTBLACK_EX  # gris para filas que no pasan
@@ -1361,6 +1772,8 @@ def print_below20_table(stocks):
                 elif j == IDX_TEND and colors["tend"]: text = f"{colors['tend']}{text}{Style.RESET_ALL}"
                 elif j == IDX_VOL and colors["vol"]:   text = f"{colors['vol']}{text}{Style.RESET_ALL}"
                 elif j == IDX_NEW:                     text = f"{colors['new']}{text}{Style.RESET_ALL}"
+                elif j == IDX_TRD and colors["trd"]:   text = f"{colors['trd']}{text}{Style.RESET_ALL}"
+                elif j == IDX_VOLC and colors["volc"]: text = f"{colors['volc']}{text}{Style.RESET_ALL}"
                 elif j in VAL_COLS:                    text = f"{Fore.GREEN}{text}{Style.RESET_ALL}"
                 elif j == 1:                           text = f"{Fore.GREEN}{text}{Style.RESET_ALL}"
             else:
@@ -1371,6 +1784,8 @@ def print_below20_table(stocks):
                 elif j == IDX_TEND and colors["tend"]: text = f"{colors['tend']}{text}{Style.RESET_ALL}"
                 elif j == IDX_VOL and colors["vol"]:   text = f"{colors['vol']}{text}{Style.RESET_ALL}"
                 elif j == IDX_NEW:                     text = f"{colors['new']}{text}{Style.RESET_ALL}"
+                elif j == IDX_TRD and colors["trd"]:   text = f"{colors['trd']}{text}{Style.RESET_ALL}"
+                elif j == IDX_VOLC and colors["volc"]: text = f"{colors['volc']}{text}{Style.RESET_ALL}"
                 elif j == IDX_CHG and colors["chg"]:   text = f"{GREY}{text}{Style.RESET_ALL}"
                 else:                                  text = f"{GREY}{text}{Style.RESET_ALL}"
             cells.append(text)
@@ -1532,10 +1947,12 @@ def print_help():
                 Market Cap >500M, Target Price +50%, Analyst Buy+,
                 Price 20% below SMA20, Country USA.
               No requiere tickers como argumento.
-              Columna Vol%: % de volumen del día de mayor caída (últimos 10 días)
-                vs la media de los 20 días anteriores a esa caída. Via yfinance.
-                Verde >+200% (capitulación), Amarillo +50-200%, Rojo <+50%
-                Se muestra siempre con la fecha del día de la caída.
+              Columna Tend D: velas D (de las 21 previas a la caída) con
+                MA20>MA40 y MA100>MA200. Verde = cumple | Amarillo >= 10/21
+                | Gris < 10/21 | n/d = histórico insuficiente.
+              Columna VolCaida: volumen del día de mayor caída vs la media
+                de los 20 días anteriores. Verde = vela roja y volumen
+                superior a la media | Rojo = no cumple.
 
   --help      Muestra esta ayuda.
 
