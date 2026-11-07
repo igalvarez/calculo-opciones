@@ -92,6 +92,11 @@
   .ask-hint.mid  { color: #d29922; }
   .ask-hint.warn { color: #f85149; }
 
+  input[type=checkbox] { width: auto; padding: 0; accent-color: #58a6ff; }
+  .check-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #8b949e; margin: 4px 0 14px; cursor: pointer; }
+  .result-sub { font-size: 12px; color: #6e7681; margin-top: 6px; }
+  .stop-row { display: flex; align-items: center; justify-content: space-between; border-radius: 8px; padding: 16px 20px; border: 1px solid #30363d; background: #0d1117; margin-top: 8px; }
+  .stop-row .saldo-status { color: #e6edf3; }
   .sep-h { border: none; border-top: 1px solid #21262d; margin: 16px 0; }
 
   .range-display {
@@ -185,7 +190,7 @@
   <div class="header">
     <h1>📊 Calculadora de Opciones</h1>
     <div class="meta">
-      <div>Version · 2.1</div>
+      <div>Version · 2.2</div>
       <div class="src" id="meta-src">Cargando rp.xls…</div>
     </div>
   </div>
@@ -239,10 +244,23 @@
           <div class="ask-hint" id="ask-hint"></div>
         </div>
         <div class="field">
-          <label>Plus ($)</label>
-          <input type="number" id="plus" placeholder="2" value="2" step="1" min="0">
+          <label>Comisión por contrato y lado ($)</label>
+          <input type="number" id="com-contrato" value="0.70" step="0.01" min="0">
+        </div>
+        <div class="field">
+          <label>Mínimo por orden ($)</label>
+          <input type="number" id="com-min" value="1.05" step="0.01" min="0">
+        </div>
+        <div class="field">
+          <label>Colchón extra ($)</label>
+          <input type="number" id="plus" value="0.50" step="0.10" min="0">
+        </div>
+        <div class="field">
+          <label>Tu % de acierto</label>
+          <input type="number" id="acierto" value="71" step="1" min="1" max="99">
         </div>
       </div>
+      <label class="check-row"><input type="checkbox" id="penny-all"> Saltos de $0.01 a cualquier precio (SPY, QQQ, IWM)</label>
 
       <div class="section-label">Plan</div>
       <div class="plan-toggle">
@@ -262,14 +280,16 @@
         <div class="result-box">
           <div class="result-label">LIMIT</div>
           <div class="result-value hi" id="res-limit">—</div>
+          <div class="result-sub" id="res-limit-sub"></div>
         </div>
         <div class="result-box" id="box-coste">
           <div class="result-label">Coste</div>
           <div class="result-value" id="res-coste">—</div>
         </div>
         <div class="result-box">
-          <div class="result-label">Beneficio</div>
+          <div class="result-label">Beneficio neto</div>
           <div class="result-value" id="res-beneficio">—</div>
+          <div class="result-sub" id="res-beneficio-sub"></div>
         </div>
       </div>
 
@@ -279,6 +299,14 @@
           <div class="saldo-detail" id="saldo-detail">—</div>
         </div>
         <div class="saldo-right" id="res-saldo">—</div>
+      </div>
+
+      <div class="stop-row" id="stop-box">
+        <div>
+          <div class="saldo-status">Stop de equilibrio</div>
+          <div class="saldo-detail" id="stop-detail">Con tu % de acierto, salir aquí te deja en cero a largo plazo</div>
+        </div>
+        <div class="saldo-right" id="res-stop" style="color:#f85149;">—</div>
       </div>
     </div>
 
@@ -540,8 +568,10 @@ function calcularMaxContratos() {
 
   dContratos.style.display = 'flex';
 
-  // Actualizar el campo Contratos automáticamente siempre
-  document.getElementById('contratos').value = maxContratos > 0 ? maxContratos : 1;
+  // Solo baja los contratos si superan el máximo; nunca los sube por su cuenta
+  const cInput = document.getElementById('contratos');
+  const actual = parseInt(cInput.value) || 1;
+  if (maxContratos > 0 && actual > maxContratos) cInput.value = maxContratos;
 }
 
 function onTickerChange() {
@@ -583,6 +613,15 @@ function setPlan(p) {
 
 function fmt(n) { return '$' + n.toFixed(2); }
 
+/* Redondea HACIA ARRIBA al salto válido: $0.01 bajo $3, $0.05 desde $3 (programa Penny) */
+function ceilTick(price) {
+  const pennyAll = document.getElementById('penny-all').checked;
+  const tick = (pennyAll || price < 3) ? 0.01 : 0.05;
+  const cents = Math.round(tick * 100);
+  const c = Math.ceil(Math.round(price * 10000) / 100 - 1e-9);   // a centavos, hacia arriba
+  return Math.ceil(c / cents - 1e-9) * cents / 100;
+}
+
 function calcular() {
   const monto     = parseFloat(document.getElementById('monto').value)     || 0;
   const contratos = parseFloat(document.getElementById('contratos').value) || 0;
@@ -620,35 +659,74 @@ function calcular() {
     return;
   }
 
-  const limit     = Math.round((ask * (1 + plan / 100) + plus / 100) * 100) / 100;
-  const coste     = ask * 100 * contratos;
-  const beneficio = (limit - ask) * 100 * contratos;
-  const saldo     = monto * 0.5 + beneficio;
+  /* Comisiones reales: cada lado = máx(mínimo por orden, comisión × contratos) */
+  const comContrato = parseFloat(document.getElementById('com-contrato').value) || 0;
+  const comMin      = parseFloat(document.getElementById('com-min').value)      || 0;
+  const n           = Math.max(1, Math.floor(contratos) || 1);
+  const comLado     = Math.max(comMin, comContrato * n);
+  const comTotal    = 2 * comLado + plus;                 // compra + venta + extra
+
+  /* LIMIT: objetivo % + comisiones repartidas entre todas las acciones de la orden */
+  const limitRaw  = ask * (1 + plan / 100) + comTotal / (n * 100);
+  const limit     = ceilTick(limitRaw);
+  const coste     = ask * 100 * n;
+  const bruto     = (limit - ask) * 100 * n;
+  const beneficio = bruto - comTotal;                     // lo que te queda de verdad
+  const saldo     = monto * 0.5;                          // sin contar ganancias futuras
 
   document.getElementById('res-limit').textContent     = '$' + limit.toFixed(2);
+  document.getElementById('res-limit-sub').textContent = 'comisiones est. ' + fmt(comTotal);
   document.getElementById('res-coste').textContent     = fmt(coste);
   document.getElementById('res-beneficio').textContent = fmt(beneficio);
+  document.getElementById('res-beneficio-sub').textContent = 'bruto ' + fmt(bruto) + ' − comis. ' + fmt(comTotal);
   document.getElementById('res-saldo').textContent     = fmt(saldo);
+
+  /* Stop de equilibrio: pérdida máxima = beneficio × p / (1 − p), comisiones incluidas */
+  const p = (parseFloat(document.getElementById('acierto').value) || 0) / 100;
+  const stopEl = document.getElementById('res-stop');
+  const stopDet = document.getElementById('stop-detail');
+  if (p > 0 && p < 1 && beneficio > 0) {
+    const perdidaMax = beneficio * p / (1 - p);
+    const stopRaw = ask - (perdidaMax - comTotal) / (n * 100);
+    if (perdidaMax <= comTotal) {
+      stopEl.textContent = '—';
+      stopDet.textContent = 'Las comisiones ya superan la pérdida admisible: sube el plan o el número de contratos';
+    } else if (stopRaw <= 0.01) {
+      stopEl.textContent = 'sin stop';
+      stopDet.textContent = 'Con ' + Math.round(p * 100) + '% de acierto aguantas perder la prima entera (' + fmt(coste + comTotal) + ')';
+    } else {
+      const stop = ceilTick(stopRaw);
+      const pct = (stop / ask - 1) * 100;
+      const perdidaReal = (ask - stop) * 100 * n + comTotal;
+      stopEl.textContent = '$' + stop.toFixed(2);
+      stopDet.textContent = pct.toFixed(0) + '% de la prima · pérdida ' + fmt(perdidaReal)
+        + ' (máx. admisible ' + fmt(perdidaMax) + ') · referencia, no recomendación';
+    }
+  } else {
+    stopEl.textContent = '—';
+    stopDet.textContent = beneficio <= 0 ? 'El beneficio neto es cero o negativo: revisa plan y comisiones'
+                                         : 'Introduce un % de acierto entre 1 y 99';
+  }
 
   const box    = document.getElementById('saldo-box');
   const boxC   = document.getElementById('box-coste');
   const status = document.getElementById('saldo-status');
   const detail = document.getElementById('saldo-detail');
 
-  if (coste <= saldo) {
+  if (coste + comTotal <= saldo) {
     box.className  = 'saldo-row ok';
     boxC.className = 'result-box green';
     status.textContent = '✅ Saldo suficiente';
-    detail.textContent = fmt(coste) + ' coste vs ' + fmt(saldo) + ' disponible';
+    detail.textContent = fmt(coste) + ' prima + ' + fmt(comTotal) + ' comis. vs ' + fmt(saldo) + ' disponible';
   } else {
     box.className  = 'saldo-row warn';
     boxC.className = 'result-box red';
     status.textContent = '⚠️ Saldo insuficiente';
-    detail.textContent = 'Necesitas ' + fmt(coste) + ' pero tienes ' + fmt(saldo);
+    detail.textContent = 'Necesitas ' + fmt(coste + comTotal) + ' (prima + comis.) pero tienes ' + fmt(saldo);
   }
 }
 
-document.querySelectorAll('input').forEach(el => el.addEventListener('input', calcular));
+document.querySelectorAll('input').forEach(el => { el.addEventListener('input', calcular); el.addEventListener('change', calcular); });
 document.getElementById('monto').addEventListener('input', calcularMaxContratos);
 document.getElementById('monto').addEventListener('input', calcStock);
 

@@ -65,6 +65,9 @@ B20_MAX_PB        = 3.0             # P/B  <  valor
 B20_MIN_SALES     = 0               # Sales  >  valor
 B20_MIN_INCOME    = 0               # Income >  valor
 B20_REQUIRE_INDEX = True            # True = debe cotizar en algún índice
+B20_INDEX_EXCLUDE = True            # True  = ELIMINA del listado las que no
+                                    #         cotizan en ningún índice
+                                    # False = se muestran (en gris si no cumplen)
 B20_MIN_IPO_YEARS = 2               # IPO hace al menos N años (>=)
 
 # ── 4) Diagnóstico ───────────────────────────────────────────────────────────
@@ -1474,6 +1477,12 @@ def fetch_below20_screener():
 
     print(" " * 50, end="\r")  # limpiar línea de progreso
 
+    # ── Excluir las que no cotizan en ningún índice (B20_INDEX_EXCLUDE) ─────
+    if B20_INDEX_EXCLUDE:
+        n_antes = len(stocks)
+        stocks = [s for s in stocks if s.get("Index", "-") not in ("", "-", "N/A")]
+        print(f"  Index (excluye sin índice): {n_antes} -> {len(stocks)}")
+
     # ── Filtro de TENDENCIA DIARIA (MA20/40/100/200) ─────────────────────────
     if B20_TREND_FILTER:
         total = len(stocks)
@@ -1587,7 +1596,7 @@ def print_below20_table(stocks):
     # Columnas: datos + 5 validaciones + Vol% + New?
     columns = [
         "#", "Ticker", "Company", "Sector", "Market Cap", "Price",
-        "Dist20%", "Tend", f"P/B<{B20_MAX_PB:g}", f"Sales>{B20_MIN_SALES:g}", f"Inc>{B20_MIN_INCOME:g}", "Index", "IPO", "New?", "Tend D", "VolCaida",
+        "Dist20%", f"P/B<{B20_MAX_PB:g}", f"Sales>{B20_MIN_SALES:g}", f"Inc>{B20_MIN_INCOME:g}", "Index", "IPO", "New?", "Tend D", "VolCaida",
     ]
 
     # Construir filas con flag all_ok para ordenar
@@ -1677,7 +1686,6 @@ def print_below20_table(stocks):
             s["Market Cap"],
             s["Price"],
             dist_str,
-            tend_str,
             pb_text,
             sales_text,
             inc_text,
@@ -1736,16 +1744,16 @@ def print_below20_table(stocks):
     # (tras insertar "Dist20%" en 7 y "Tend" en 8, todo lo de después va +1)
     IDX_CHG   = -1   # columna Change% eliminada
     IDX_DIST  = 6
-    IDX_TEND  = 7
-    IDX_PB    = 8
-    IDX_SALES = 9
-    IDX_INC   = 10
-    IDX_IDX   = 11
-    IDX_IPO   = 12
+    IDX_TEND  = -1   # columna Tend eliminada
+    IDX_PB    = 7
+    IDX_SALES = 8
+    IDX_INC   = 9
+    IDX_IDX   = 10
+    IDX_IPO   = 11
     IDX_VOL   = -1   # columna Vol% eliminada
-    IDX_NEW   = 13
-    IDX_TRD   = 14
-    IDX_VOLC  = 15
+    IDX_NEW   = 12
+    IDX_TRD   = 13
+    IDX_VOLC  = 14
 
     VAL_COLS = {IDX_PB, IDX_SALES, IDX_INC, IDX_IDX, IDX_IPO}
     GREY = Fore.LIGHTBLACK_EX  # gris para filas que no pasan

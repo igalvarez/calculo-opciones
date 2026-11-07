@@ -1925,6 +1925,218 @@ def print_stbuy_table(stocks):
     print(f"  {len(filtered)} resultado(s) tras exigir Price < Low Target\n"); print(fmt(columns)); print("-+-".join("-"*w for w in widths))
     for row in rows: print(fmt(row))
 
+# ─── PREMARKET RESUMIDO (--pre) ───────────────────────────────────────────────
+def _pre_headers(referer="https://finance.yahoo.com/"):
+    return {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+            "Accept-Language":"es-ES,es;q=0.9,en;q=0.7", "Referer":referer}
+
+def _pre_signed(v):
+    try: v=float(v)
+    except (TypeError,ValueError): return f"{Fore.LIGHTBLACK_EX}n/d{Style.RESET_ALL}"
+    c=Fore.GREEN if v>0 else Fore.RED if v<0 else Fore.WHITE
+    return f"{c}{v:+.2f}%{Style.RESET_ALL}"
+
+def _trim(v,n):
+    v=" ".join(str(v or "").split()); return v if len(v)<=n else v[:n-1]+"…"
+
+def fetch_pre_futures():
+    from urllib.parse import quote
+    out=[]; states=[]
+    for label,symbol in [("DOW","YM=F"),("S&P 500","ES=F"),("NASDAQ 100","NQ=F")]:
+        pct=None; state="UNKNOWN"
+        try:
+            u="https://query1.finance.yahoo.com/v8/finance/chart/"+quote(symbol)+"?interval=5m&range=1d&includePrePost=true"
+            m=requests.get(u,headers=_pre_headers(),timeout=12).json()["chart"]["result"][0]["meta"]
+            last=m.get("regularMarketPrice"); prev=m.get("chartPreviousClose") or m.get("previousClose")
+            state=str(m.get("marketState") or "UNKNOWN").upper()
+            if last is not None and prev: pct=(float(last)/float(prev)-1)*100
+        except Exception: pass
+        out.append((label,pct)); states.append(state)
+    active=any(x in {"PRE","PREPRE","REGULAR","POST","POSTPOST"} for x in states)
+    return out,active
+
+def fetch_pre_headlines(limit=2):
+    import xml.etree.ElementTree as ET
+    found=[]
+    try:
+        r=requests.get("https://finance.yahoo.com/news/rssindex",headers=_pre_headers(),timeout=12); r.raise_for_status()
+        for n in ET.fromstring(r.content).findall(".//item"):
+            t=(n.findtext("title") or "").strip()
+            if t and t not in [x[0] for x in found]: found.append((t,"Yahoo"))
+            if len(found)>=limit: break
+    except Exception: pass
+    if len(found)<limit:
+        try:
+            from bs4 import BeautifulSoup
+            r=requests.get("https://finviz.com/news.ashx",headers=_pre_headers("https://finviz.com/"),timeout=12); r.raise_for_status()
+            for a in BeautifulSoup(r.text,"html.parser").select("a.nn-tab-link, a.news-link-left"):
+                t=a.get_text(" ",strip=True)
+                if len(t)>=25 and t not in [x[0] for x in found]: found.append((t,"Finviz"))
+                if len(found)>=limit: break
+        except Exception: pass
+    return found[:limit]
+
+def fetch_pre_agenda(days=7, limit=40):
+    """Investing.com ★★★ USA; fallback Yahoo con eventos macro prioritarios."""
+    from bs4 import BeautifulSoup
+    import re
+    today=datetime.date.today(); last=today+datetime.timedelta(days=days-1)
+    session=requests.Session(); page="https://es.investing.com/economic-calendar"
+    endpoint=page+"/Service/getCalendarFilteredData"
+    headers=_pre_headers(page)
+    headers.update({"X-Requested-With":"XMLHttpRequest","Origin":"https://es.investing.com"})
+    payload=[("dateFrom",today.isoformat()),("dateTo",last.isoformat()),("timeZone","8"),
+             ("timeFilter","timeRemain"),("currentTab","custom"),("limit_from","0"),
+             ("country[]","5"),("importance[]","3")]
+    primary_error=None
+    try:
+        session.get(page,headers=_pre_headers(),timeout=15)
+        r=session.post(endpoint,headers=headers,data=payload,timeout=20); r.raise_for_status()
+        try: body=r.json().get("data","")
+        except Exception: body=r.text
+        soup=BeautifulSoup(body,"html.parser")
+        html_rows=soup.select("tr.js-event-item, tr[event_attr_id], tr[data-event-datetime]")
+        if not html_rows:
+            primary_error="Investing.com respondió, pero cambió o bloqueó el formato"
+        rows=[]
+        for tr in html_rows:
+            cur=tr.select_one("td.flagCur,.flagCur")
+            if cur and "USD" not in cur.get_text(" ",strip=True).upper(): continue
+            imp=tr.select_one("td.sentiment,.sentiment"); stars=0
+            if imp:
+                stars=len(imp.select("i.grayFullBullishIcon,i.fullBullishIcon,i[class*='FullBullish']"))
+                hint=" ".join((imp.get("title",""),imp.get("aria-label",""),str(imp)))
+                if re.search(r"alta|high|bull3|sentiment-3",hint,re.I): stars=max(stars,3)
+            if stars<3: continue
+            raw=tr.get("data-event-datetime",""); dt=None
+            for fmt in ("%Y/%m/%d %H:%M:%S","%Y-%m-%d %H:%M:%S"):
+                try: dt=datetime.datetime.strptime(raw,fmt); break
+                except ValueError: pass
+            if not dt or not(today<=dt.date()<=last): continue
+            n=tr.select_one("td.event a,td.event,.event"); event=n.get_text(" ",strip=True) if n else ""
+            def cell(sel):
+                x=tr.select_one(sel); return x.get_text(" ",strip=True) if x else ""
+            if event: rows.append((dt.date(),dt.strftime("%I:%M %p").lstrip("0"),event,"",cell("td.act"),cell("td.fore"),cell("td.prev")))
+        if rows: return sorted(rows,key=lambda x:(x[0],x[1],x[2]))[:limit],None,"Investing.com"
+        if primary_error is None: primary_error="Investing.com respondió sin eventos ★★★ USA reconocibles"
+    except Exception as e: primary_error=f"Investing.com no accesible ({type(e).__name__})"
+
+    # Fallback transparente: Yahoo, solo USA y eventos macro considerados prioritarios.
+    important=re.compile(r"JOLTS|Nonfarm|Non-Farm|Unemployment Rate|Jobless Claims|Initial Claims|CPI|Consumer Price|PPI|Producer Price|Core PCE|GDP|Gross Domestic|Retail Sales|Services PMI|Manufacturing PMI|ISM|Interest Rate|FOMC|Powell|Fed Minutes",re.I)
+    fallback=[]
+    for offset in range(days):
+        day=today+datetime.timedelta(days=offset)
+        try:
+            r=requests.get(f"https://finance.yahoo.com/calendar/economic?day={day.isoformat()}",headers=_pre_headers(),timeout=15); r.raise_for_status()
+            soup=BeautifulSoup(r.text,"html.parser")
+            for tr in soup.select("table tbody tr"):
+                cols=[" ".join(x.get_text(" ",strip=True).split()) for x in tr.select("td")]
+                ci=next((i for i,x in enumerate(cols) if x.upper() in {"US","USA","UNITED STATES"}),None)
+                if ci is None or not cols or not important.search(cols[0]): continue
+                def val(i): return cols[i] if i<len(cols) else ""
+                fallback.append((day,val(ci+1),cols[0].rstrip("* "),val(ci+2),val(ci+3),val(ci+4),val(ci+5)))
+        except Exception: pass
+    if fallback: return sorted(fallback,key=lambda x:(x[0],x[1],x[2]))[:limit],primary_error,"Yahoo fallback"
+    return [],primary_error,None
+
+_EARNINGS={
+"SPCX":"SPACEX","NVDA":"NVIDIA","AVGO":"Broadcom","AMD":"AMD","MU":"Micron","INTC":"Intel","TXN":"Texas Instruments",
+"ADI":"Analog Devices","QCOM":"Qualcomm","MRVL":"Marvell","LRCX":"Lam Research","AMAT":"Applied Materials","KLAC":"KLA",
+"MSFT":"Microsoft","AAPL":"Apple","GOOGL":"Alphabet","META":"Meta","AMZN":"Amazon","TSLA":"Tesla","ORCL":"Oracle",
+"PLTR":"Palantir","NFLX":"Netflix","CSCO":"Cisco","MCD":"McDonald's","HD":"Home Depot","WMT":"Walmart","COST":"Costco",
+"JPM":"JPMorgan","BAC":"Bank of America","V":"Visa","MA":"Mastercard","AXP":"American Express","GS":"Goldman Sachs",
+"LLY":"Eli Lilly","JNJ":"Johnson & Johnson","UNH":"UnitedHealth","GE":"GE Aerospace","CAT":"Caterpillar","XOM":"Exxon Mobil","CVX":"Chevron"}
+
+def _optionslam(ticker):
+    import re
+    from bs4 import BeautifulSoup
+    try:
+        r=requests.get(f"https://www.optionslam.com/earnings/stocks/{ticker}",headers=_pre_headers("https://www.optionslam.com/"),timeout=15); r.raise_for_status()
+        text=" ".join(BeautifulSoup(r.text,"html.parser").get_text(" ",strip=True).split())
+        m=re.search(r"Next Earnings Date\s*:?\s*([A-Z][a-z]{2,8}\.?\s+\d{1,2},\s+\d{4})\s+(BO|AC)",text,re.I)
+        if not m: return None
+        d=None
+        for fmt in ("%b %d, %Y","%B %d, %Y"):
+            try: d=datetime.datetime.strptime(m.group(1).replace(".",""),fmt).date(); break
+            except ValueError: pass
+        if not d: return None
+        est=bool(__import__('re').search(r"\bEstimated\b",text[max(0,m.start()-120):m.end()+120],__import__('re').I))
+        return d,m.group(2).upper(),est
+    except Exception: return None
+
+def fetch_pre_earnings(limit=30):
+    from concurrent.futures import ThreadPoolExecutor,as_completed
+    today=datetime.date.today(); last=today+datetime.timedelta(days=6); out=[]
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        jobs={ex.submit(_optionslam,t):t for t in _EARNINGS}
+        for job in as_completed(jobs):
+            t=jobs[job]; v=job.result()
+            if v and today<=v[0]<=last: out.append((v[0],v[1],v[2],t,_EARNINGS[t]))
+    return sorted(out,key=lambda x:(x[0],x[1],x[3]))[:limit]
+
+def _agenda_time_value(day, time_text):
+    """Devuelve datetime para ordenar y clasificar una hora ET."""
+    text = " ".join(str(time_text or "").strip().upper().split())
+    for fmt in ("%I:%M %p", "%H:%M"):
+        try:
+            return datetime.datetime.combine(day, datetime.datetime.strptime(text, fmt).time())
+        except ValueError:
+            pass
+    return datetime.datetime.combine(day, datetime.time.max)
+
+
+def _agenda_operational_alert(day, time_text):
+    """Aviso compacto respecto a la apertura regular de las 9:30 ET."""
+    today = datetime.datetime.now().date()
+    if day != today:
+        return "", ""
+    event_dt = _agenda_time_value(day, time_text)
+    market_open = datetime.datetime.combine(day, datetime.time(9, 30))
+    delta_min = int((event_dt - market_open).total_seconds() // 60)
+
+    # Ventana que puede alterar la preparación/apertura normal: 8:00–10:30 ET.
+    if datetime.time(9, 30) <= event_dt.time() <= datetime.time(10, 30):
+        return f"NO NORMAL +{delta_min}m", Fore.RED
+    if datetime.time(8, 0) <= event_dt.time() < datetime.time(9, 30):
+        return f"PRE-OPEN {abs(delta_min)}m", Fore.YELLOW
+    return "", ""
+
+
+def print_premarket_summary():
+    now=datetime.datetime.now(); print(f"\n{Fore.CYAN}{'='*82}{Style.RESET_ALL}")
+    print(f"{Style.BRIGHT}  WALL STREET HOY — PREMARKET  {now:%d %B %Y}{Style.RESET_ALL}"); print(f"{Fore.CYAN}{'='*82}{Style.RESET_ALL}")
+    fut,active=fetch_pre_futures(); title="FUTUROS" if active else "FUTUROS — MERCADO CERRADO / ÚLTIMA SESIÓN"
+    print(f"\n{Fore.YELLOW}{Style.BRIGHT}{title}{Style.RESET_ALL}\n  "+"   ".join(f"{n}: {_pre_signed(v)}" for n,v in fut))
+    news=fetch_pre_headlines(2)
+    for i in range(2):
+        print(f"\n{Fore.CYAN}{i+1:02d}{Style.RESET_ALL}  {Style.BRIGHT}NOTICIA{Style.RESET_ALL}")
+        print("  "+(_trim(news[i][0],70)+f" {Fore.LIGHTBLACK_EX}({news[i][1]}){Style.RESET_ALL}" if i<len(news) else "Sin titular disponible."))
+    print(f"\n{Fore.CYAN}03{Style.RESET_ALL}  {Fore.YELLOW}{Style.BRIGHT}AGENDA USA — ALTO IMPACTO ★★★ — PRÓXIMOS 7 DÍAS — ET{Style.RESET_ALL}")
+    agenda,err,agenda_source=fetch_pre_agenda()
+    if agenda:
+        agenda = sorted(agenda, key=lambda row: _agenda_time_value(row[0], row[1]))
+        print(f"  {Style.BRIGHT}{'FECHA':<11} {'HORA':<9} {'EVENTO':<29} {'ACTUAL':>7} {'CONS.':>7} {'ANT.':>7} {'AVISO':<18}{Style.RESET_ALL}")
+        print("  "+"-"*100)
+        for d,tm,e,p,a,f,pr in agenda:
+            alert, alert_color = _agenda_operational_alert(d, tm)
+            alert_text = f"{alert_color}{Style.BRIGHT}{alert:<18}{Style.RESET_ALL}" if alert else " "*18
+            print(f"  {d:%a %d %b} {tm:<9} {_trim(e,29):<29} {_trim(a,7):>7} {_trim(f,7):>7} {_trim(pr,7):>7} {alert_text}")
+        if err: print(f"  {Fore.YELLOW}Aviso: {err}; usando {agenda_source}.{Style.RESET_ALL}")
+    elif err: print(f"  {Fore.RED}{err}.{Style.RESET_ALL}")
+    else: print(f"  {Fore.LIGHTBLACK_EX}Sin eventos USA de alto impacto (★★★) en los próximos 7 días.{Style.RESET_ALL}")
+    print(f"\n{Fore.CYAN}04{Style.RESET_ALL}  {Fore.YELLOW}{Style.BRIGHT}EARNINGS — PRÓXIMOS 7 DÍAS — GRANDES / SEMICONDUCTORES{Style.RESET_ALL}")
+    ern=fetch_pre_earnings()
+    if ern:
+        print(f"  {Style.BRIGHT}{'FECHA':<12} {'HORA':<5} {'EST':<4} {'TICKER':<8} EMPRESA{Style.RESET_ALL}"); print("  "+"-"*58)
+        for d,h,est,t,c in ern: print(f"  {d:%d %b %Y}  {h:<5} {('EST' if est else ''):<4} {t:<8} {c}")
+    else: print(f"  {Fore.LIGHTBLACK_EX}Sin earnings en los próximos 7 días.{Style.RESET_ALL}")
+    watched=["TSLA","GOOGL","META","MSFT","AMZN","ORCL"]
+    shown={row[3] for row in ern}
+    missing=[t for t in watched if t not in shown]
+    if missing: print(f"  {Fore.LIGHTBLACK_EX}Seguidas sin earnings en esta ventana: {', '.join(missing)}{Style.RESET_ALL}")
+    print(f"\n{Fore.LIGHTBLACK_EX}BO: before open | AC: after close | EST: estimated. Fuentes: Investing.com (primaria), Yahoo Finance (respaldo), Finviz, OptionSlam y Federal Reserve.{Style.RESET_ALL}\n")
+
+
 # ─── AYUDA ────────────────────────────────────────────────────────────────────
 
 def print_help():
@@ -1937,6 +2149,7 @@ def print_help():
   python get-info.py [FLAGS] TICKER1 [TICKER2 ... TICKER15]
 
 {Fore.YELLOW}FLAGS:{Style.RESET_ALL}
+  --pre       Resumen premarket, agenda USA ★★★ y earnings de los próximos 7 días.
   --target    Muestra solo la tabla resumen de precios y targets.
               No muestra ratings ni insider trading.
 
@@ -2010,6 +2223,9 @@ def print_help():
 
 def main():
     args = sys.argv[1:]
+    if "--pre" in args:
+        print_premarket_summary()
+        return
 
     if "--help" in args:
         print_help()
@@ -2050,7 +2266,7 @@ def main():
     tickers = args
 
     if not tickers:
-        print("Uso: python get-info.py [--target] [--news] [--below20] [--stbuy] [--help] TICKER1 [TICKER2 ... TICKER15]")
+        print("Uso: python get-info.py [--pre] [--target] [--news] [--below20] [--stbuy] [--help] TICKER1 [TICKER2 ... TICKER15]")
         print("  Usa --help para ver la ayuda completa.")
         sys.exit(1)
 
