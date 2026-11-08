@@ -79,6 +79,8 @@
 
   /* Ajustes secundarios: pequeños, para no robar espacio */
   .mini { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; align-items: end; }
+  .mini.one { grid-template-columns: minmax(150px, 200px) 1fr; gap: 14px; }
+  .mini.one input { font-size: 16px; padding: 6px 10px; }
   .mini label { font-size: 11px; color: #6e7681; }
   .mini input { font-size: 14px; padding: 5px 8px; font-weight: 600; }
   input[type=checkbox] { width: auto; padding: 0; accent-color: #58a6ff; }
@@ -113,7 +115,6 @@
   .gan-box .lab { font-size: 13px; color: #3fb950; font-weight: 600; }
   .gan-box .val { font-size: clamp(22px, 3.6vh, 34px); font-weight: 700; }
   .gan-box .det { font-size: 12px; color: #8b949e; }
-  .mini.acc { grid-template-columns: repeat(4, minmax(90px, 140px)); margin-top: 8px; }
 
   .error-banner { background: #2d1212; border: 1px solid #da3633; border-radius: 6px; color: #f85149; font-size: 13px; padding: 10px 14px; display: none; line-height: 1.6; }
   .error-banner code { background: #0d1117; padding: 2px 6px; border-radius: 3px; color: #e6edf3; }
@@ -122,7 +123,7 @@
     .card { height: auto; min-height: 100vh; }
     .opciones, .ticker-row { grid-template-columns: 1fr; }
     .acciones-row { grid-template-columns: 1fr 1fr; }
-    .mini, .mini.acc { grid-template-columns: 1fr 1fr; }
+    .mini.one { grid-template-columns: 1fr; }
   }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -132,7 +133,7 @@
 
   <div class="header">
     <h1>📊 Calculadora de Opciones y Acciones</h1>
-    <div class="meta"><div>Versión 2.4</div><div id="meta-src">Cargando rp.xls…</div></div>
+    <div class="meta"><div>Versión 2.5</div><div id="meta-src">Cargando rp.xls…</div></div>
   </div>
 
   <div class="error-banner" id="error-banner"></div>
@@ -174,13 +175,10 @@
         <div class="plan-btn p100"   id="btn100" tabindex="0" onclick="setPlan(100)">Plan 100%</div>
       </div>
 
-      <div class="mini">
-        <div class="field"><label for="com-contrato">Comis. real/contrato y lado</label><input type="number" id="com-contrato" value="0.65" step="0.01" min="0"></div>
-        <div class="field"><label for="com-min">Comis. real: mínimo por orden</label><input type="number" id="com-min" value="1.00" step="0.01" min="0"></div>
+      <div class="mini one">
         <div class="field"><label for="plus">Plus por contrato ($)</label><input type="number" id="plus" value="2.00" step="0.10" min="0"></div>
-        <div class="field"><label for="acierto">Tu % de acierto</label><input type="number" id="acierto" value="71" step="1" min="1" max="99"></div>
+        <label class="check-row"><input type="checkbox" id="penny-all"> Saltos de $0.01 a cualquier precio (SPY, QQQ, IWM)</label>
       </div>
-      <label class="check-row"><input type="checkbox" id="penny-all"> Saltos de $0.01 a cualquier precio (SPY, QQQ, IWM)</label>
     </div>
 
     <div class="panel col">
@@ -203,10 +201,6 @@
       <div class="saldo-row ok" id="saldo-box">
         <div><div class="saldo-status" id="saldo-status">Selecciona un ticker</div><div class="saldo-detail" id="saldo-detail">—</div></div>
         <div class="saldo-right" id="res-saldo">—</div>
-      </div>
-      <div class="stop-row" id="stop-box">
-        <div><div class="saldo-status">Stop de equilibrio</div><div class="saldo-detail" id="stop-detail">Con tu % de acierto, salir aquí te deja en cero a largo plazo</div></div>
-        <div class="saldo-right" id="res-stop" style="color:#f85149;">—</div>
       </div>
     </div>
   </div>
@@ -238,12 +232,6 @@
         <div class="val" id="sp-ganancia-val">—</div>
         <div class="det" id="sp-ganancia-detail">—</div>
       </div>
-    </div>
-    <div class="mini acc">
-      <div class="field"><label for="sp-com-acc">Comisión por acción</label><input type="number" id="sp-com-acc" value="0.005" step="0.001" min="0" oninput="calcStock()"></div>
-      <div class="field"><label for="sp-com-min">Mínimo por orden ($)</label><input type="number" id="sp-com-min" value="1.00" step="0.05" min="0" oninput="calcStock()"></div>
-      <div class="field"><label for="sp-com-max">Máximo (% del valor)</label><input type="number" id="sp-com-max" value="1" step="0.1" min="0" oninput="calcStock()"></div>
-      <div class="field"><label for="sp-colchon">Colchón extra ($)</label><input type="number" id="sp-colchon" value="0" step="0.10" min="0" oninput="calcStock()"></div>
     </div>
   </div>
 
@@ -517,8 +505,8 @@ function calcular() {
   const limit       = ceilTick(limitRaw);
 
   /* Comisiones REALES estimadas (IBKR Fixed): cada lado = máx(mínimo por orden, comisión × contratos) */
-  const comContrato = parseFloat(document.getElementById('com-contrato').value) || 0;
-  const comMin      = parseFloat(document.getElementById('com-min').value)      || 0;
+  const comContrato = 0.65;   // IBKR Fixed: $ por contrato y lado
+  const comMin      = 1.00;   // IBKR Fixed: mínimo por orden
   const comTotal    = 2 * Math.max(comMin, comContrato * n);   // compra + venta
   const plusTotal   = plus * n;                                // lo que el LIMIT reserva para comisiones
 
@@ -535,33 +523,6 @@ function calcular() {
   document.getElementById('res-beneficio-sub').textContent = 'bruto ' + fmt(bruto) + ' − comis. reales ' + fmt(comTotal)
       + (margen >= 0 ? ' · margen +' + fmt(margen) : ' · FALTAN ' + fmt(-margen));
   document.getElementById('res-saldo').textContent     = fmt(saldo);
-
-  /* Stop de equilibrio: pérdida máxima = beneficio × p / (1 − p), comisiones incluidas */
-  const p = (parseFloat(document.getElementById('acierto').value) || 0) / 100;
-  const stopEl = document.getElementById('res-stop');
-  const stopDet = document.getElementById('stop-detail');
-  if (p > 0 && p < 1 && beneficio > 0) {
-    const perdidaMax = beneficio * p / (1 - p);
-    const stopRaw = ask - (perdidaMax - comTotal) / (n * 100);
-    if (perdidaMax <= comTotal) {
-      stopEl.textContent = '—';
-      stopDet.textContent = 'Las comisiones ya superan la pérdida admisible: sube el plan o el número de contratos';
-    } else if (stopRaw <= 0.01) {
-      stopEl.textContent = 'sin stop';
-      stopDet.textContent = 'Con ' + Math.round(p * 100) + '% de acierto aguantas perder la prima entera (' + fmt(coste + comTotal) + ')';
-    } else {
-      const stop = ceilTick(stopRaw);
-      const pct = (stop / ask - 1) * 100;
-      const perdidaReal = (ask - stop) * 100 * n + comTotal;
-      stopEl.textContent = '$' + stop.toFixed(2);
-      stopDet.textContent = pct.toFixed(0) + '% de la prima · pérdida ' + fmt(perdidaReal)
-        + ' (máx. admisible ' + fmt(perdidaMax) + ') · referencia, no recomendación';
-    }
-  } else {
-    stopEl.textContent = '—';
-    stopDet.textContent = beneficio <= 0 ? 'El beneficio neto es cero o negativo: revisa plan y comisiones'
-                                         : 'Introduce un % de acierto entre 1 y 99';
-  }
 
   const box    = document.getElementById('saldo-box');
   const boxC   = document.getElementById('box-coste');
@@ -593,10 +554,10 @@ function calcStock() {
   const pct    = parseFloat(document.getElementById('sp-pct').value);
   const qty    = parseInt(document.getElementById('sp-qty').value) || 0;
   const monto  = parseFloat(document.getElementById('monto').value) || 0;
-  const porAcc = parseFloat(document.getElementById('sp-com-acc').value) || 0;
-  const minOrd = parseFloat(document.getElementById('sp-com-min').value) || 0;
-  const maxPct = parseFloat(document.getElementById('sp-com-max').value);
-  const colch  = parseFloat(document.getElementById('sp-colchon').value) || 0;
+  const porAcc = 0.005;   // IBKR Fixed: $ por acción
+  const minOrd = 1.00;    // mínimo por orden
+  const maxPct = 1;       // máximo: 1% del valor de la orden
+  const colch  = 0;       // colchón extra
 
   const limitEl = document.getElementById('sp-limit'), detailEl = document.getElementById('sp-detail');
   const resBox  = document.getElementById('sp-result-box'), warnEl = document.getElementById('sp-price-warn');
