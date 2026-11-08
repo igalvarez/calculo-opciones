@@ -132,7 +132,7 @@
 
   <div class="header">
     <h1>📊 Calculadora de Opciones y Acciones</h1>
-    <div class="meta"><div>Versión 2.3</div><div id="meta-src">Cargando rp.xls…</div></div>
+    <div class="meta"><div>Versión 2.4</div><div id="meta-src">Cargando rp.xls…</div></div>
   </div>
 
   <div class="error-banner" id="error-banner"></div>
@@ -175,9 +175,9 @@
       </div>
 
       <div class="mini">
-        <div class="field"><label for="com-contrato">Comisión/contrato y lado</label><input type="number" id="com-contrato" value="0.70" step="0.01" min="0"></div>
-        <div class="field"><label for="com-min">Mínimo por orden</label><input type="number" id="com-min" value="1.05" step="0.01" min="0"></div>
-        <div class="field"><label for="plus">Colchón extra ($)</label><input type="number" id="plus" value="0.50" step="0.10" min="0"></div>
+        <div class="field"><label for="com-contrato">Comis. real/contrato y lado</label><input type="number" id="com-contrato" value="0.65" step="0.01" min="0"></div>
+        <div class="field"><label for="com-min">Comis. real: mínimo por orden</label><input type="number" id="com-min" value="1.00" step="0.01" min="0"></div>
+        <div class="field"><label for="plus">Plus por contrato ($)</label><input type="number" id="plus" value="2.00" step="0.10" min="0"></div>
         <div class="field"><label for="acierto">Tu % de acierto</label><input type="number" id="acierto" value="71" step="1" min="1" max="99"></div>
       </div>
       <label class="check-row"><input type="checkbox" id="penny-all"> Saltos de $0.01 a cualquier precio (SPY, QQQ, IWM)</label>
@@ -509,26 +509,31 @@ function calcular() {
     return;
   }
 
-  /* Comisiones reales: cada lado = máx(mínimo por orden, comisión × contratos) */
+  /* LIMIT (método de la academia): ASK × (1 + plan%) + Plus por contrato ÷ 100.
+     El Plus ($2 por contrato) va sumado al precio de cada contrato, así que el LIMIT es el MISMO
+     para 1 contrato o para 100. */
+  const n           = Math.max(1, Math.floor(contratos) || 1);
+  const limitRaw    = ask * (1 + plan / 100) + plus / 100;
+  const limit       = ceilTick(limitRaw);
+
+  /* Comisiones REALES estimadas (IBKR Fixed): cada lado = máx(mínimo por orden, comisión × contratos) */
   const comContrato = parseFloat(document.getElementById('com-contrato').value) || 0;
   const comMin      = parseFloat(document.getElementById('com-min').value)      || 0;
-  const n           = Math.max(1, Math.floor(contratos) || 1);
-  const comLado     = Math.max(comMin, comContrato * n);
-  const comTotal    = 2 * comLado + plus;                 // compra + venta + extra
+  const comTotal    = 2 * Math.max(comMin, comContrato * n);   // compra + venta
+  const plusTotal   = plus * n;                                // lo que el LIMIT reserva para comisiones
 
-  /* LIMIT: objetivo % + comisiones repartidas entre todas las acciones de la orden */
-  const limitRaw  = ask * (1 + plan / 100) + comTotal / (n * 100);
-  const limit     = ceilTick(limitRaw);
   const coste     = ask * 100 * n;
   const bruto     = (limit - ask) * 100 * n;
-  const beneficio = bruto - comTotal;                     // lo que te queda de verdad
-  const saldo     = monto * 0.5;                          // sin contar ganancias futuras
+  const beneficio = bruto - comTotal;                          // ganancia neta con comisiones reales
+  const margen    = plusTotal - comTotal;                      // colchón que queda a tu favor
+  const saldo     = monto * 0.5;                               // sin contar ganancias futuras
 
   document.getElementById('res-limit').textContent     = '$' + limit.toFixed(2);
-  document.getElementById('res-limit-sub').textContent = 'comisiones est. ' + fmt(comTotal);
+  document.getElementById('res-limit-sub').textContent = 'ASK × (1+plan) + $' + plus.toFixed(2) + ' por contrato';
   document.getElementById('res-coste').textContent     = fmt(coste);
   document.getElementById('res-beneficio').textContent = fmt(beneficio);
-  document.getElementById('res-beneficio-sub').textContent = 'bruto ' + fmt(bruto) + ' − comis. ' + fmt(comTotal);
+  document.getElementById('res-beneficio-sub').textContent = 'bruto ' + fmt(bruto) + ' − comis. reales ' + fmt(comTotal)
+      + (margen >= 0 ? ' · margen +' + fmt(margen) : ' · FALTAN ' + fmt(-margen));
   document.getElementById('res-saldo').textContent     = fmt(saldo);
 
   /* Stop de equilibrio: pérdida máxima = beneficio × p / (1 − p), comisiones incluidas */
