@@ -79,7 +79,7 @@
 
   /* Ajustes secundarios: pequeños, para no robar espacio */
   .mini { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; align-items: end; }
-  .mini.one { grid-template-columns: minmax(150px, 200px) 1fr; gap: 14px; }
+  .mini.one { grid-template-columns: minmax(150px, 220px); }
   .mini.one input { font-size: 16px; padding: 6px 10px; }
   .mini label { font-size: 11px; color: #6e7681; }
   .mini input { font-size: 14px; padding: 5px 8px; font-weight: 600; }
@@ -94,7 +94,7 @@
   .result-sub { font-size: 12px; color: #6e7681; margin-top: 4px; }
   #limit-box { border-width: 2px; border-color: #f0a030; }
   #res-limit, #sp-limit { font-size: clamp(38px, 8vh, 80px); line-height: 1.05; }
-  .results2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .results2 { display: grid; grid-template-columns: 1fr; gap: 10px; }
 
   .saldo-row, .stop-row {
     display: flex; align-items: center; justify-content: space-between; border-radius: 8px;
@@ -133,7 +133,7 @@
 
   <div class="header">
     <h1>📊 Calculadora de Opciones y Acciones</h1>
-    <div class="meta"><div>Versión 2.5</div><div id="meta-src">Cargando rp.xls…</div></div>
+    <div class="meta"><div>Versión 2.6</div><div id="meta-src">Cargando rp.xls…</div></div>
   </div>
 
   <div class="error-banner" id="error-banner"></div>
@@ -177,7 +177,6 @@
 
       <div class="mini one">
         <div class="field"><label for="plus">Plus por contrato ($)</label><input type="number" id="plus" value="2.00" step="0.10" min="0"></div>
-        <label class="check-row"><input type="checkbox" id="penny-all"> Saltos de $0.01 a cualquier precio (SPY, QQQ, IWM)</label>
       </div>
     </div>
 
@@ -191,11 +190,6 @@
         <div class="result-box" id="box-coste">
           <div class="result-label">Coste</div>
           <div class="result-value" id="res-coste">—</div>
-        </div>
-        <div class="result-box">
-          <div class="result-label">Beneficio neto</div>
-          <div class="result-value" id="res-beneficio">—</div>
-          <div class="result-sub" id="res-beneficio-sub"></div>
         </div>
       </div>
       <div class="saldo-row ok" id="saldo-box">
@@ -453,7 +447,7 @@ function fmt(n) { return '$' + n.toFixed(2); }
 
 /* Redondea HACIA ARRIBA al salto válido: $0.01 bajo $3, $0.05 desde $3 (programa Penny) */
 function ceilTick(price) {
-  const pennyAll = document.getElementById('penny-all').checked;
+  const pennyAll = ['SPY','QQQ','IWM'].includes((sel.value || '').toUpperCase());   // $0.01 a cualquier precio
   const tick = (pennyAll || price < 3) ? 0.01 : 0.05;
   const cents = Math.round(tick * 100);
   const c = Math.ceil(Math.round(price * 10000) / 100 - 1e-9);   // a centavos, hacia arriba
@@ -490,7 +484,7 @@ function calcular() {
   }
 
   if (isNaN(ask) || ask <= 0) {
-    ['res-limit','res-coste','res-beneficio','res-saldo'].forEach(id =>
+    ['res-limit','res-coste','res-saldo'].forEach(id =>
       document.getElementById(id).textContent = '—');
     document.getElementById('saldo-status').textContent = 'Introduce el ASK';
     document.getElementById('saldo-detail').textContent = '—';
@@ -504,24 +498,14 @@ function calcular() {
   const limitRaw    = ask * (1 + plan / 100) + plus / 100;
   const limit       = ceilTick(limitRaw);
 
-  /* Comisiones REALES estimadas (IBKR Fixed): cada lado = máx(mínimo por orden, comisión × contratos) */
-  const comContrato = 0.65;   // IBKR Fixed: $ por contrato y lado
-  const comMin      = 1.00;   // IBKR Fixed: mínimo por orden
-  const comTotal    = 2 * Math.max(comMin, comContrato * n);   // compra + venta
-  const plusTotal   = plus * n;                                // lo que el LIMIT reserva para comisiones
-
+  /* Comisión real estimada (IBKR Fixed), solo para comprobar el saldo: máx(mínimo, $0.65 × contratos) por lado */
+  const comTotal  = 2 * Math.max(1.00, 0.65 * n);
   const coste     = ask * 100 * n;
-  const bruto     = (limit - ask) * 100 * n;
-  const beneficio = bruto - comTotal;                          // ganancia neta con comisiones reales
-  const margen    = plusTotal - comTotal;                      // colchón que queda a tu favor
   const saldo     = monto * 0.5;                               // sin contar ganancias futuras
 
   document.getElementById('res-limit').textContent     = '$' + limit.toFixed(2);
   document.getElementById('res-limit-sub').textContent = 'ASK × (1+plan) + $' + plus.toFixed(2) + ' por contrato';
   document.getElementById('res-coste').textContent     = fmt(coste);
-  document.getElementById('res-beneficio').textContent = fmt(beneficio);
-  document.getElementById('res-beneficio-sub').textContent = 'bruto ' + fmt(bruto) + ' − comis. reales ' + fmt(comTotal)
-      + (margen >= 0 ? ' · margen +' + fmt(margen) : ' · FALTAN ' + fmt(-margen));
   document.getElementById('res-saldo').textContent     = fmt(saldo);
 
   const box    = document.getElementById('saldo-box');
