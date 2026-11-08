@@ -3,285 +3,193 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Calculadora Opciones</title>
+<title>Calculadora Opciones y Acciones</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-
+  html, body { height: 100%; }
   body {
-    background: #0d1117;
-    color: #e6edf3;
+    background: #0d1117; color: #e6edf3;
     font-family: 'Segoe UI', system-ui, sans-serif;
-    min-height: 100vh;
-    display: flex;
-    align-items: stretch;
-    justify-content: stretch;
-    padding: 0;
-    margin: 0;
+    display: flex; justify-content: center;
   }
-
+  /* Todo cabe en una pantalla: la página ocupa el alto de la ventana y se reparte en 3 filas */
   .card {
-    background: #161b22;
-    border: none;
-    border-radius: 0;
-    padding: 24px 32px;
-    width: 100%;
-    min-height: 100vh;
+    width: 100%; max-width: 1480px; height: 100vh;
+    display: grid; grid-template-rows: auto auto minmax(0,1fr) auto;
+    gap: clamp(6px, 1.2vh, 14px);
+    padding: clamp(10px, 1.8vh, 22px) clamp(14px, 2.2vw, 36px);
+    overflow: auto;
   }
+  .header { display: flex; align-items: center; justify-content: space-between; }
+  h1 { font-size: clamp(15px, 2vh, 19px); font-weight: 600; }
+  .meta { font-size: 12px; color: #6e7681; text-align: right; line-height: 1.4; }
 
-  .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 20px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid #21262d;
-  }
+  .panel { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: clamp(10px, 1.6vh, 18px) clamp(12px, 1.4vw, 22px); min-height: 0; }
+  .panel-title { font-size: 13px; font-weight: 600; color: #8b949e; margin-bottom: clamp(6px, 1vh, 10px); }
 
-  h1 { font-size: 18px; font-weight: 600; color: #e6edf3; }
-  .meta { font-size: 12px; color: #484f58; text-align: right; line-height: 1.5; }
-  .meta .src { color: #6e7681; }
+  .opciones { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(10px, 1.4vw, 22px); min-height: 0; }
+  .col { display: flex; flex-direction: column; gap: clamp(6px, 1.1vh, 12px); min-height: 0; }
 
-  .layout {
-    display: grid;
-    grid-template-columns: 1fr 1px 1fr;
-    gap: 0 16px;
-    align-items: start;
-  }
-
-  .divider-v { background: #21262d; width: 1px; align-self: stretch; }
-
-  .section-label {
-    font-size: 13px;
-    font-weight: 600;
-    color: #8b949e;
-    text-transform: uppercase;
-    letter-spacing: 0.7px;
-    margin-bottom: 10px;
-  }
-
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-
-  .field { display: flex; flex-direction: column; gap: 6px; }
-  label  { font-size: 13px; color: #8b949e; }
+  label { font-size: 13px; color: #8b949e; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
 
   input, select {
-    background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 6px;
-    color: #e6edf3;
-    font-size: 18px;
-    font-weight: 600;
-    padding: 10px 12px;
-    width: 100%;
-    outline: none;
-    transition: border-color 0.15s;
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3;
+    font-size: clamp(15px, 2.1vh, 18px); font-weight: 600;
+    padding: clamp(6px, 1vh, 10px) 12px; width: 100%; outline: none; transition: border-color 0.15s;
   }
-
   select { cursor: pointer; }
-  select option { background: #161b22; color: #e6edf3; font-weight: 600; }
+  select option { background: #161b22; color: #e6edf3; }
   select:disabled { opacity: 0.5; cursor: wait; }
-
   input:focus, select:focus { border-color: #58a6ff; }
+  input:focus-visible, select:focus-visible, .plan-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+
+  /* Los dos campos clave, lo más grandes posible */
+  #ask, #sp-price {
+    font-size: clamp(30px, 6vh, 58px); font-weight: 700; padding: clamp(6px, 1.2vh, 14px) 16px;
+    border-width: 2px; letter-spacing: 0.5px;
+  }
+  .big-label { font-size: 15px; color: #c9d1d9; font-weight: 600; }
+
   input.ask-ok   { border-color: #238636; }
   input.ask-mid  { border-color: #d29922; background: #1a1408; }
   input.ask-warn { border-color: #da3633; background: #1a0a0a; }
+  .ask-hint { font-size: 13px; min-height: 17px; }
+  .ask-hint.ok { color: #3fb950; } .ask-hint.mid { color: #d29922; } .ask-hint.warn { color: #f85149; }
 
-  .ask-hint { font-size: 13px; min-height: 18px; }
-  .ask-hint.ok   { color: #3fb950; }
-  .ask-hint.mid  { color: #d29922; }
-  .ask-hint.warn { color: #f85149; }
-
-  input[type=checkbox] { width: auto; padding: 0; accent-color: #58a6ff; }
-  .check-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #8b949e; margin: 4px 0 14px; cursor: pointer; }
-  .result-sub { font-size: 12px; color: #6e7681; margin-top: 6px; }
-  .stop-row { display: flex; align-items: center; justify-content: space-between; border-radius: 8px; padding: 16px 20px; border: 1px solid #30363d; background: #0d1117; margin-top: 8px; }
-  .stop-row .saldo-status { color: #e6edf3; }
-  .sep-h { border: none; border-top: 1px solid #21262d; margin: 16px 0; }
-
+  .ticker-row { display: grid; grid-template-columns: minmax(150px, 1fr) 2fr; gap: 10px; align-items: start; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .range-display {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 6px;
-    padding: 10px 14px;
-    margin-bottom: 8px;
-    font-size: 14px;
-    color: #8b949e;
+    display: flex; align-items: center; gap: 6px; background: #0d1117; border: 1px solid #30363d;
+    border-radius: 6px; padding: 4px 10px; font-size: 13px; color: #8b949e;
   }
-  .range-display .val { color: #f0a030; font-weight: 700; font-size: 16px; }
-  .range-display.alt .val { color: #6e7681; font-size: 14px; }
-  .range-display .fecha { margin-left: auto; font-size: 12px; color: #484f58; }
+  .range-display .val { color: #f0a030; font-weight: 700; font-size: 15px; }
+  .range-display.alt .val { color: #8b949e; font-size: 13px; }
+  .range-display .fecha { font-size: 11px; color: #6e7681; }
 
-  .plan-toggle { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .plan-toggle { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .plan-btn {
-    background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 6px;
-    color: #8b949e;
-    cursor: pointer;
-    font-size: 16px;
-    font-weight: 600;
-    padding: 10px;
-    text-align: center;
-    transition: all 0.15s;
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #8b949e; cursor: pointer;
+    font-size: clamp(14px, 2vh, 16px); font-weight: 600; padding: clamp(6px, 1vh, 10px); text-align: center; transition: all 0.15s;
   }
-
   .plan-btn.active      { background: #1f3a5f; border-color: #58a6ff; color: #58a6ff; }
   .plan-btn.p100.active { background: #2d1f5f; border-color: #a371f7; color: #a371f7; }
 
-  .results { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  /* Ajustes secundarios: pequeños, para no robar espacio */
+  .mini { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; align-items: end; }
+  .mini label { font-size: 11px; color: #6e7681; }
+  .mini input { font-size: 14px; padding: 5px 8px; font-weight: 600; }
+  input[type=checkbox] { width: auto; padding: 0; accent-color: #58a6ff; }
+  .check-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6e7681; cursor: pointer; }
 
-  .result-box {
-    background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 8px;
-    padding: 20px 10px;
-    text-align: center;
-    transition: border-color 0.3s;
+  .result-box { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: clamp(6px, 1.2vh, 14px) 10px; text-align: center; transition: border-color 0.3s; }
+  .result-label { font-size: 13px; color: #8b949e; margin-bottom: 4px; }
+  .result-value { font-size: clamp(20px, 3.2vh, 30px); font-weight: 700; color: #e6edf3; }
+  .result-value.hi { color: #f0a030; } .result-value.pu { color: #a371f7; }
+  .result-box.green { border-color: #238636; } .result-box.red { border-color: #da3633; }
+  .result-sub { font-size: 12px; color: #6e7681; margin-top: 4px; }
+  #limit-box { border-width: 2px; border-color: #f0a030; }
+  #res-limit, #sp-limit { font-size: clamp(38px, 8vh, 80px); line-height: 1.05; }
+  .results2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  .saldo-row, .stop-row {
+    display: flex; align-items: center; justify-content: space-between; border-radius: 8px;
+    padding: clamp(6px, 1vh, 12px) 16px; border: 1px solid #30363d; background: #0d1117; transition: all 0.3s;
   }
-
-  .result-label { font-size: 13px; color: #8b949e; margin-bottom: 8px; }
-  .result-value { font-size: 32px; font-weight: 700; color: #e6edf3; }
-  .result-value.hi { color: #f0a030; }
-  .result-value.pu { color: #a371f7; }
-  .result-box.green { border-color: #238636; }
-  .result-box.red   { border-color: #da3633; }
-
-  .saldo-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-radius: 8px;
-    padding: 16px 20px;
-    border: 1px solid;
-    transition: all 0.3s;
-  }
-
   .saldo-row.ok   { background: #0d2818; border-color: #238636; }
   .saldo-row.warn { background: #2d1212; border-color: #da3633; }
+  .saldo-status { font-size: 15px; font-weight: 600; color: #e6edf3; }
+  .saldo-row.ok .saldo-status { color: #3fb950; } .saldo-row.warn .saldo-status { color: #f85149; }
+  .saldo-detail { font-size: 12px; color: #8b949e; margin-top: 2px; }
+  .saldo-right  { font-size: clamp(18px, 2.8vh, 26px); font-weight: 700; color: #e6edf3; white-space: nowrap; margin-left: 8px; }
 
-  .saldo-status { font-size: 16px; font-weight: 600; }
-  .saldo-row.ok   .saldo-status { color: #3fb950; }
-  .saldo-row.warn .saldo-status { color: #f85149; }
-  .saldo-detail { font-size: 13px; color: #8b949e; margin-top: 4px; }
-  .saldo-right  { font-size: 28px; font-weight: 700; color: #e6edf3; white-space: nowrap; margin-left: 8px; }
+  /* Acciones */
+  .acciones-row { display: grid; grid-template-columns: 1.6fr 0.8fr 0.7fr 1.6fr 1.3fr; gap: clamp(8px, 1vw, 16px); align-items: stretch; }
+  .acciones-row .field input:not(#sp-price) { font-size: clamp(18px, 2.8vh, 24px); }
+  .warn-txt { font-size: 12px; color: #f85149; display: none; }
+  .gan-box { background: #0d2818; border: 1px solid #238636; border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; justify-content: center; }
+  .gan-box .lab { font-size: 13px; color: #3fb950; font-weight: 600; }
+  .gan-box .val { font-size: clamp(22px, 3.6vh, 34px); font-weight: 700; }
+  .gan-box .det { font-size: 12px; color: #8b949e; }
+  .mini.acc { grid-template-columns: repeat(4, minmax(90px, 140px)); margin-top: 8px; }
 
-  .error-banner {
-    background: #2d1212;
-    border: 1px solid #da3633;
-    border-radius: 6px;
-    color: #f85149;
-    font-size: 13px;
-    padding: 12px 16px;
-    margin-bottom: 16px;
-    display: none;
-    line-height: 1.6;
-  }
+  .error-banner { background: #2d1212; border: 1px solid #da3633; border-radius: 6px; color: #f85149; font-size: 13px; padding: 10px 14px; display: none; line-height: 1.6; }
   .error-banner code { background: #0d1117; padding: 2px 6px; border-radius: 3px; color: #e6edf3; }
+
+  @media (max-width: 900px) {
+    .card { height: auto; min-height: 100vh; }
+    .opciones, .ticker-row { grid-template-columns: 1fr; }
+    .acciones-row { grid-template-columns: 1fr 1fr; }
+    .mini, .mini.acc { grid-template-columns: 1fr 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
 <div class="card">
 
   <div class="header">
-    <h1>📊 Calculadora de Opciones</h1>
-    <div class="meta">
-      <div>Version · 2.2</div>
-      <div class="src" id="meta-src">Cargando rp.xls…</div>
-    </div>
+    <h1>📊 Calculadora de Opciones y Acciones</h1>
+    <div class="meta"><div>Versión 2.3</div><div id="meta-src">Cargando rp.xls…</div></div>
   </div>
 
   <div class="error-banner" id="error-banner"></div>
 
-  <div class="layout">
-
-    <!-- IZQUIERDA -->
-    <div>
-      <div class="section-label">Ticker</div>
-      <div class="field" style="margin-bottom:7px;">
-        <select id="ticker-select" onchange="onTickerChange()" disabled>
+  <!-- ── OPCIONES ── -->
+  <div class="opciones">
+    <div class="panel col">
+      <div class="ticker-row">
+        <select id="ticker-select" onchange="onTickerChange()" disabled aria-label="Ticker">
           <option value="">— Cargando… —</option>
         </select>
+        <div class="chips">
+          <div class="range-display" id="range-display" style="display:none;">
+            <span>Rango óptimo</span><span class="val" id="range-opt">—</span><span class="fecha" id="range-fecha"></span>
+          </div>
+          <div class="range-display alt" id="range-display-mm" style="display:none;">
+            <span>Mín / Máx</span><span class="val" id="range-mm">—</span>
+          </div>
+          <div class="range-display" id="range-display-contratos" style="display:none;">
+            <span>Máx contratos</span><span class="val" id="range-contratos-val">—</span><span class="fecha" id="range-contratos-detalle"></span>
+          </div>
+        </div>
       </div>
 
-      <div class="range-display" id="range-display" style="display:none;">
-        <span>Rango óptimo:</span>
-        <span class="val" id="range-opt">—</span>
-        <span class="fecha" id="range-fecha"></span>
+      <div class="field">
+        <label class="big-label" for="ask">ASK (prima)</label>
+        <input type="number" id="ask" placeholder="1.24" step="0.01" inputmode="decimal">
+        <div class="ask-hint" id="ask-hint"></div>
       </div>
 
-      <div class="range-display alt" id="range-display-mm" style="display:none;">
-        <span>Mín / Máx:</span>
-        <span class="val" id="range-mm">—</span>
+      <div class="grid2">
+        <div class="field"><label for="monto">Monto inicial ($)</label><input type="number" id="monto" placeholder="800" value="800"></div>
+        <div class="field"><label for="contratos">Contratos</label><input type="number" id="contratos" placeholder="1" min="1" value="1"></div>
       </div>
 
-      <div class="range-display" id="range-display-contratos" style="display:none;">
-        <span>Máx contratos</span>
-        <span style="font-size:11px; color:#484f58;">(50% monto ÷ optMax×100)</span>
-        <span class="val" id="range-contratos-val" style="color:#f0a030; font-size:20px;">—</span>
-        <span style="margin-left:auto; font-size:12px; color:#484f58;" id="range-contratos-detalle"></span>
+      <div class="plan-toggle" role="group" aria-label="Plan">
+        <div class="plan-btn active" id="btn10"  tabindex="0" onclick="setPlan(10)">Plan 10%</div>
+        <div class="plan-btn"        id="btn35"  tabindex="0" onclick="setPlan(35)">Plan 35%</div>
+        <div class="plan-btn p100"   id="btn100" tabindex="0" onclick="setPlan(100)">Plan 100%</div>
       </div>
 
-      <hr class="sep-h">
-      <div class="section-label">Operación</div>
-
-      <div class="grid2" style="margin-bottom:8px;">
-        <div class="field">
-          <label>Monto inicial ($)</label>
-          <input type="number" id="monto" placeholder="800" value="800">
-        </div>
-        <div class="field">
-          <label>Contratos</label>
-          <input type="number" id="contratos" placeholder="1" min="1" value="1">
-        </div>
-        <div class="field">
-          <label>ASK (prima)</label>
-          <input type="number" id="ask" placeholder="1.24" step="0.01">
-          <div class="ask-hint" id="ask-hint"></div>
-        </div>
-        <div class="field">
-          <label>Comisión por contrato y lado ($)</label>
-          <input type="number" id="com-contrato" value="0.70" step="0.01" min="0">
-        </div>
-        <div class="field">
-          <label>Mínimo por orden ($)</label>
-          <input type="number" id="com-min" value="1.05" step="0.01" min="0">
-        </div>
-        <div class="field">
-          <label>Colchón extra ($)</label>
-          <input type="number" id="plus" value="0.50" step="0.10" min="0">
-        </div>
-        <div class="field">
-          <label>Tu % de acierto</label>
-          <input type="number" id="acierto" value="71" step="1" min="1" max="99">
-        </div>
+      <div class="mini">
+        <div class="field"><label for="com-contrato">Comisión/contrato y lado</label><input type="number" id="com-contrato" value="0.70" step="0.01" min="0"></div>
+        <div class="field"><label for="com-min">Mínimo por orden</label><input type="number" id="com-min" value="1.05" step="0.01" min="0"></div>
+        <div class="field"><label for="plus">Colchón extra ($)</label><input type="number" id="plus" value="0.50" step="0.10" min="0"></div>
+        <div class="field"><label for="acierto">Tu % de acierto</label><input type="number" id="acierto" value="71" step="1" min="1" max="99"></div>
       </div>
       <label class="check-row"><input type="checkbox" id="penny-all"> Saltos de $0.01 a cualquier precio (SPY, QQQ, IWM)</label>
-
-      <div class="section-label">Plan</div>
-      <div class="plan-toggle">
-        <div class="plan-btn active" id="btn10"  onclick="setPlan(10)">10%</div>
-        <div class="plan-btn"        id="btn35"  onclick="setPlan(35)">35%</div>
-        <div class="plan-btn p100"   id="btn100" onclick="setPlan(100)">100%</div>
-      </div>
     </div>
 
-    <!-- DIVISOR -->
-    <div class="divider-v"></div>
-
-    <!-- DERECHA -->
-    <div>
-      <div class="section-label">Resultados</div>
-      <div class="results">
-        <div class="result-box">
-          <div class="result-label">LIMIT</div>
-          <div class="result-value hi" id="res-limit">—</div>
-          <div class="result-sub" id="res-limit-sub"></div>
-        </div>
+    <div class="panel col">
+      <div class="result-box" id="limit-box">
+        <div class="result-label">LIMIT a poner en el bróker</div>
+        <div class="result-value hi" id="res-limit">—</div>
+        <div class="result-sub" id="res-limit-sub"></div>
+      </div>
+      <div class="results2">
         <div class="result-box" id="box-coste">
           <div class="result-label">Coste</div>
           <div class="result-value" id="res-coste">—</div>
@@ -292,109 +200,51 @@
           <div class="result-sub" id="res-beneficio-sub"></div>
         </div>
       </div>
-
-      <div class="saldo-row ok" id="saldo-box" style="margin-top:8px;">
-        <div>
-          <div class="saldo-status" id="saldo-status">Selecciona un ticker</div>
-          <div class="saldo-detail" id="saldo-detail">—</div>
-        </div>
+      <div class="saldo-row ok" id="saldo-box">
+        <div><div class="saldo-status" id="saldo-status">Selecciona un ticker</div><div class="saldo-detail" id="saldo-detail">—</div></div>
         <div class="saldo-right" id="res-saldo">—</div>
       </div>
-
       <div class="stop-row" id="stop-box">
-        <div>
-          <div class="saldo-status">Stop de equilibrio</div>
-          <div class="saldo-detail" id="stop-detail">Con tu % de acierto, salir aquí te deja en cero a largo plazo</div>
-        </div>
+        <div><div class="saldo-status">Stop de equilibrio</div><div class="saldo-detail" id="stop-detail">Con tu % de acierto, salir aquí te deja en cero a largo plazo</div></div>
         <div class="saldo-right" id="res-stop" style="color:#f85149;">—</div>
       </div>
     </div>
-
   </div>
 
-  <!-- ── CALCULADORA PRECIO OBJETIVO ACCIONES ── -->
-  <div style="margin-top:28px; border-top:1px solid #21262d; padding-top:24px;">
-    <div class="section-label">📈 Precio objetivo — Acciones (Long)</div>
-    <div style="display:grid; grid-template-columns:1fr 1px 0.7fr 1px 0.7fr 1px 0.7fr 1px 1fr; gap:0 16px; align-items:end; margin-top:14px;">
-
-      <!-- Stock Price -->
+  <!-- ── ACCIONES ── -->
+  <div class="panel">
+    <div class="panel-title">📈 Acciones (compra) — precio LIMIT de venta <span id="sp-max-label" style="color:#6e7681; font-weight:400;"></span></div>
+    <div class="acciones-row">
       <div class="field">
-        <label>
-          Stock Price ($)
-          <span id="sp-max-label" style="font-size:11px; color:#484f58; margin-left:6px;">máx: —</span>
-        </label>
-        <input type="number" id="sp-price" placeholder="300.00" step="0.01" oninput="calcStock()">
-        <div id="sp-price-warn" style="display:none; font-size:12px; color:#f85149; margin-top:4px;">
-          ⚠️ Supera el 50% del monto disponible
-        </div>
+        <label class="big-label" for="sp-price">Precio de compra ($)</label>
+        <input type="number" id="sp-price" placeholder="300.00" step="0.01" inputmode="decimal" oninput="calcStock()">
+        <div class="warn-txt" id="sp-price-warn">⚠️ Supera el 50% del monto disponible</div>
       </div>
-
-      <div class="divider-v" style="align-self:stretch;"></div>
-
-      <!-- % Rentabilidad -->
       <div class="field">
-        <label>Rentabilidad objetivo (%)</label>
-        <input type="number" id="sp-pct" placeholder="5" step="0.1" oninput="calcStock()">
+        <label for="sp-pct">Objetivo (%)</label>
+        <input type="number" id="sp-pct" placeholder="1.25" step="0.05" oninput="calcStock()">
       </div>
-
-      <div class="divider-v" style="align-self:stretch;"></div>
-
-      <!-- Cantidad de acciones -->
       <div class="field">
-        <label>Cantidad</label>
+        <label for="sp-qty">Cantidad</label>
         <input type="number" id="sp-qty" placeholder="3" step="1" min="1" oninput="calcStock()">
       </div>
-
-      <div class="divider-v" style="align-self:stretch;"></div>
-
-      <!-- Plus (comisiones compra + venta) -->
-      <div class="field">
-        <label>
-          Plus ($)
-          <span style="font-size:11px; color:#484f58; margin-left:6px;">comis. compra+venta</span>
-        </label>
-        <input type="number" id="sp-plus" placeholder="2" value="2" step="0.01" min="0" oninput="calcStock()">
+      <div class="result-box" id="sp-result-box" style="border-width:2px;">
+        <div class="result-label">LIMIT de venta</div>
+        <div class="result-value hi" id="sp-limit">—</div>
+        <div class="result-sub" id="sp-detail">—</div>
       </div>
-
-      <div class="divider-v" style="align-self:stretch;"></div>
-
-      <!-- Resultado -->
-      <div>
-        <div style="font-size:13px; color:#8b949e; margin-bottom:6px;">Precio LIMIT a poner en broker</div>
-        <div id="sp-result-box" style="
-          background:#0d1117;
-          border:1px solid #30363d;
-          border-radius:8px;
-          padding:16px 14px;
-          text-align:center;
-          transition:border-color 0.3s;
-        ">
-          <div id="sp-limit" style="font-size:36px; font-weight:700; color:#f0a030;">—</div>
-          <div id="sp-detail" style="font-size:12px; color:#484f58; margin-top:4px;">—</div>
-        </div>
+      <div class="gan-box" id="sp-ganancia-row">
+        <div class="lab">Ganancia neta si se ejecuta</div>
+        <div class="val" id="sp-ganancia-val">—</div>
+        <div class="det" id="sp-ganancia-detail">—</div>
       </div>
-
     </div>
-
-    <!-- Fila extra: ganancia en $ sobre el monto inicial -->
-    <div id="sp-ganancia-row" style="
-      display:none;
-      margin-top:12px;
-      background:#0d2818;
-      border:1px solid #238636;
-      border-radius:8px;
-      padding:14px 20px;
-      display:none;
-      align-items:center;
-      justify-content:space-between;
-    ">
-      <div>
-        <div style="font-size:14px; font-weight:600; color:#3fb950;">✅ Ganancia estimada sobre monto inicial</div>
-        <div id="sp-ganancia-detail" style="font-size:13px; color:#8b949e; margin-top:2px;">—</div>
-      </div>
-      <div id="sp-ganancia-val" style="font-size:28px; font-weight:700; color:#e6edf3; white-space:nowrap; margin-left:12px;">—</div>
+    <div class="mini acc">
+      <div class="field"><label for="sp-com-acc">Comisión por acción</label><input type="number" id="sp-com-acc" value="0.005" step="0.001" min="0" oninput="calcStock()"></div>
+      <div class="field"><label for="sp-com-min">Mínimo por orden ($)</label><input type="number" id="sp-com-min" value="1.00" step="0.05" min="0" oninput="calcStock()"></div>
+      <div class="field"><label for="sp-com-max">Máximo (% del valor)</label><input type="number" id="sp-com-max" value="1" step="0.1" min="0" oninput="calcStock()"></div>
+      <div class="field"><label for="sp-colchon">Colchón extra ($)</label><input type="number" id="sp-colchon" value="0" step="0.10" min="0" oninput="calcStock()"></div>
     </div>
-
   </div>
 
 </div>
@@ -736,67 +586,61 @@ document.getElementById('monto').addEventListener('input', calcStock);
 function calcStock() {
   const price  = parseFloat(document.getElementById('sp-price').value);
   const pct    = parseFloat(document.getElementById('sp-pct').value);
-  const qty    = parseInt(document.getElementById('sp-qty').value)   || 0;
-  const plus   = parseFloat(document.getElementById('sp-plus').value) || 0;
+  const qty    = parseInt(document.getElementById('sp-qty').value) || 0;
   const monto  = parseFloat(document.getElementById('monto').value) || 0;
+  const porAcc = parseFloat(document.getElementById('sp-com-acc').value) || 0;
+  const minOrd = parseFloat(document.getElementById('sp-com-min').value) || 0;
+  const maxPct = parseFloat(document.getElementById('sp-com-max').value);
+  const colch  = parseFloat(document.getElementById('sp-colchon').value) || 0;
 
-  const limitEl   = document.getElementById('sp-limit');
-  const detailEl  = document.getElementById('sp-detail');
-  const resBox    = document.getElementById('sp-result-box');
-  const ganRow    = document.getElementById('sp-ganancia-row');
-  const ganVal    = document.getElementById('sp-ganancia-val');
-  const ganDetail = document.getElementById('sp-ganancia-detail');
-  const maxLabel  = document.getElementById('sp-max-label');
-  const warnEl    = document.getElementById('sp-price-warn');
+  const limitEl = document.getElementById('sp-limit'), detailEl = document.getElementById('sp-detail');
+  const resBox  = document.getElementById('sp-result-box'), warnEl = document.getElementById('sp-price-warn');
+  const ganVal  = document.getElementById('sp-ganancia-val'), ganDet = document.getElementById('sp-ganancia-detail');
   const priceInput = document.getElementById('sp-price');
 
-  // Calcular y mostrar el máximo total permitido para la operación (50% del monto)
+  /* Comisión IBKR Fixed por orden: $0.005/acción, mínimo $1, máximo 1% del valor de la orden */
+  const comOrden = (valor) => {
+    let c = Math.max(minOrd, porAcc * qty);
+    if (!isNaN(maxPct) && maxPct > 0) c = Math.min(c, valor * maxPct / 100);
+    return c;
+  };
+
   const maxOperacion = monto > 0 ? monto * 0.5 : null;
-  const costeOperacion = !isNaN(price) && qty > 0 ? price * qty : 0;
-  maxLabel.textContent = maxOperacion ? 'máx. operación: $' + maxOperacion.toFixed(2) : 'máx: —';
+  document.getElementById('sp-max-label').textContent = maxOperacion ? '· máximo por operación ' + fmt(maxOperacion) : '';
 
-  // Validar el coste total: precio por acción × cantidad
-  const superaLimite = maxOperacion && costeOperacion > maxOperacion;
-  if (superaLimite) {
-    warnEl.style.display = 'block';
-    priceInput.style.borderColor = '#f85149';
-  } else {
-    warnEl.style.display = 'none';
-    priceInput.style.borderColor = '';
-  }
-
-  if (isNaN(price) || price <= 0 || isNaN(pct) || qty <= 0 || superaLimite) {
-    limitEl.textContent  = superaLimite ? '🚫' : '—';
-    detailEl.textContent = superaLimite ? 'Reduce el precio o aumenta el monto' : '—';
-    resBox.style.borderColor = superaLimite ? '#f85149' : '#30363d';
-    ganRow.style.display = 'none';
+  if (isNaN(price) || price <= 0 || isNaN(pct) || qty <= 0) {
+    limitEl.textContent = '—'; detailEl.textContent = '—'; ganVal.textContent = '—'; ganDet.textContent = '—';
+    resBox.style.borderColor = '#30363d'; warnEl.style.display = 'none'; priceInput.style.borderColor = '';
     return;
   }
 
-  // LIMIT = ((precio × cantidad) × (1 + rentabilidad) + comisiones) ÷ cantidad
-  const inversion      = price * qty;
-  const plusPorAccion  = plus / qty;
-  const precioObjetivo = price * (1 + pct / 100);
-  const ganPorAccion   = precioObjetivo - price;
-  const precioLimit    = (inversion * (1 + pct / 100) + plus) / qty;
+  const inversion = price * qty;
+  const comCompra = comOrden(inversion);
+  const objetivo  = inversion * (1 + pct / 100);
 
-  limitEl.textContent  = '$' + precioLimit.toFixed(2);
-  detailEl.textContent = '+$' + ganPorAccion.toFixed(2) + ' (' + pct.toFixed(1) + '%) + $'
-                       + plusPorAccion.toFixed(2) + ' comis. = $' + precioLimit.toFixed(2) + '/acción';
-  resBox.style.borderColor = '#238636';
+  /* LIMIT = (inversión × (1 + objetivo) + comisión compra + comisión venta + colchón) ÷ cantidad.
+     La comisión de venta depende del propio LIMIT: se ajusta en dos pasadas. */
+  let comVenta = comOrden(objetivo);
+  let limitRaw = (objetivo + comCompra + comVenta + colch) / qty;
+  comVenta = comOrden(limitRaw * qty);
+  limitRaw = (objetivo + comCompra + comVenta + colch) / qty;
+  const limit = Math.ceil(limitRaw * 100 - 1e-9) / 100;          // siempre hacia arriba, al centavo
 
-  // Ganancia NETA real con la cantidad indicada (descontando el Plus completo)
-  if (qty > 0) {
-    const gananciaBruta = qty * ganPorAccion;
-    const gananciaNeta  = gananciaBruta - plus;   // Plus = comisiones totales (compra+venta)
-    ganVal.textContent     = '$' + gananciaNeta.toFixed(2);
-    ganDetail.textContent  = qty + ' acciones · inversión $' + inversion.toFixed(2)
-                           + '  ·  bruto $' + gananciaBruta.toFixed(2)
-                           + ' − comis. $' + plus.toFixed(2) + ' = neto $' + gananciaNeta.toFixed(2);
-    ganRow.style.display   = 'flex';
-  } else {
-    ganRow.style.display = 'none';
-  }
+  /* Ganancia real si se vende al LIMIT (el colchón no es un gasto, queda como ganancia extra) */
+  const comVentaReal = comOrden(limit * qty);
+  const neto   = limit * qty - inversion - comCompra - comVentaReal;
+  const netoPc = neto / inversion * 100;
+
+  const supera = maxOperacion && (inversion + comCompra) > maxOperacion;
+  warnEl.style.display = supera ? 'block' : 'none';
+  priceInput.style.borderColor = supera ? '#f85149' : '';
+
+  limitEl.textContent  = '$' + limit.toFixed(2);
+  detailEl.textContent = 'objetivo +' + pct.toFixed(2) + '% · comisiones ' + fmt(comCompra + comVentaReal);
+  resBox.style.borderColor = supera ? '#f85149' : '#238636';
+
+  ganVal.textContent = fmt(neto) + '  (' + netoPc.toFixed(2) + '%)';
+  ganDet.textContent = qty + ' acciones · inversión ' + fmt(inversion) + ' · comisión compra ' + fmt(comCompra) + ' + venta ' + fmt(comVentaReal);
 }
 
 cargarDatos();
