@@ -289,22 +289,63 @@ CSS = (
     ".pe{grid-template-columns:28px 44px minmax(0,1fr) auto}.sp{grid-template-columns:50px 46px minmax(0,1fr) auto}.sp.hy{background:var(--wb)}"
     ".hr{color:var(--m);font-size:11.5px;white-space:nowrap}.nu{color:var(--m);font-size:11.5px;text-align:right}.nu b{color:var(--f)}"
     ".ev0{color:var(--m);margin:4px 0}.ev0.n{color:var(--n)}"
+    ".up{font:inherit;font-size:11.5px;padding:1px 9px;border-radius:99px;border:1px solid var(--b);background:var(--c);color:var(--f);cursor:pointer}"
+    ".up:disabled{opacity:.55;cursor:default}.up:hover:not(:disabled){border-color:var(--a)}.hdr{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;justify-content:flex-end}"
     "footer{color:var(--m);font-size:11px;margin:14px 0 2px}"
     "@media(max-width:360px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}}"
 )
+
+# Botón "Actualizar": lanza el workflow premarket.yml con la API de GitHub. Necesita un token personal (fine-grained, solo este
+# repo, permiso Actions: lectura y escritura) que se pega UNA vez y se guarda solo en el navegador (localStorage). Nunca va en el repo.
+BOTON_JS = """(function(){
+var b=document.getElementById('up'),st=document.getElementById('upst'),h=document.getElementById('hc');if(!b)return;
+var K='premarket_gh_token';
+function say(t){st.textContent=t}
+function repo(){return b.dataset.repo||(location.hostname.split('.')[0]+'/'+location.pathname.split('/')[1])}
+function get(){try{return localStorage.getItem(K)}catch(e){return null}}
+function put(v){try{localStorage.setItem(K,v)}catch(e){}}
+function del(){try{localStorage.removeItem(K)}catch(e){}}
+function esperar(){
+  var t0=Date.parse(h&&h.dataset.iso),ini=Date.now();
+  var iv=setInterval(function(){
+    fetch('estado.json?'+Date.now(),{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){
+      if(j&&j.utc&&Date.parse(j.utc)>t0){clearInterval(iv);say('Listo, recargando…');location.reload()}
+    }).catch(function(){});
+    if(Date.now()-ini>9*60e3){clearInterval(iv);say('Tarda más de lo normal: recarga en unos minutos.');b.disabled=false}
+  },15000);
+}
+b.onclick=function(){
+  var t=get();
+  if(!t){
+    t=prompt('Pega tu token de GitHub (fine-grained, solo este repositorio, permiso Actions: lectura y escritura). Se guarda solo en este navegador.');
+    if(!t)return;t=t.trim();put(t);
+  }
+  b.disabled=true;say('Lanzando…');
+  fetch('https://api.github.com/repos/'+repo()+'/actions/workflows/premarket.yml/dispatches',{
+    method:'POST',
+    headers:{'Accept':'application/vnd.github+json','Authorization':'Bearer '+t,'X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'},
+    body:JSON.stringify({ref:'main',inputs:{forzar:'true'}})
+  }).then(function(r){
+    if(r.status===204){say('Lanzado. Se actualiza en ~2-3 min…');esperar()}
+    else if(r.status===401||r.status===403||r.status===404){del();say('Token rechazado ('+r.status+'). Pulsa de nuevo para pegar otro.');b.disabled=false}
+    else{say('Error '+r.status);b.disabled=false}
+  }).catch(function(){say('Sin conexión');b.disabled=false});
+};
+})();"""
 
 PLANTILLA = (
     '<!doctype html><html lang="es"><head><meta charset="utf-8">'
     '<meta name="viewport" content="width=device-width,initial-scale=1"><title>Premarket Wall Street</title>'
     "<style>__CSS__</style></head><body><div class=\"w\">"
     '<header><div><h1>Wall Street hoy · Premarket</h1><div class="s">__FECHA__</div></div>'
-    '<div class="s">__CHIP__ Actualizado <b>__ACTUALIZADO__</b> <span id="hc" data-iso="__ISO__"></span></div></header>'
+    '<div class="s hdr">__CHIP__ <span>Actualizado <b>__ACTUALIZADO__</b> <span id="hc" data-iso="__ISO__"></span></span>'
+    '<button id="up" class="up" type="button" data-repo="__REPO__" title="Lanza el workflow ahora">↻ Actualizar</button><span id="upst"></span></div></header>'
     "__CUERPO__"
     "<footer>Se actualiza 3 veces por día de mercado (8:00, 8:30 y 9:15 hora de Nueva York; la bolsa abre a las 9:30). "
     "Fuentes: Yahoo Finance (con retraso), Nasdaq, Google News, Investing.com. No es una recomendación de inversión.</footer>"
     "</div><script>(function(){var e=document.getElementById('hc');if(!e)return;var t=Date.parse(e.dataset.iso);if(isNaN(t))return;"
     "function f(){var m=Math.max(0,Math.round((Date.now()-t)/6e4));e.textContent='· '+(m<60?'hace '+m+' min':'hace '+Math.floor(m/60)+' h '+m%60+' min')}"
-    "f();setInterval(f,3e4)})()</script></body></html>"
+    "f();setInterval(f,3e4)})()</script><script>__BOTON__</script></body></html>"
 )
 
 
@@ -344,7 +385,8 @@ def main():
     fecha = f"{DIAS_LARGO[ahora.weekday()]} {ahora.day} de {MESES_LARGO[ahora.month - 1]} de {ahora.year}"
     actualizado = f"{ahora:%H:%M} ET"
     pagina = (PLANTILLA.replace("__CSS__", CSS).replace("__FECHA__", fecha).replace("__CHIP__", chip("franja " + franja, "a"))
-              .replace("__ACTUALIZADO__", actualizado).replace("__ISO__", utc.isoformat()).replace("__CUERPO__", cuerpo))
+              .replace("__ACTUALIZADO__", actualizado).replace("__ISO__", utc.isoformat())
+              .replace("__REPO__", os.environ.get("GITHUB_REPOSITORY", "")).replace("__BOTON__", BOTON_JS).replace("__CUERPO__", cuerpo))
 
     os.makedirs(a.salida, exist_ok=True)
     with open(os.path.join(a.salida, "index.html"), "w", encoding="utf-8", newline="\n") as f:
