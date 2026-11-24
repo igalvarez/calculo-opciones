@@ -2599,18 +2599,206 @@ def datos_earnings_recientes(cal,hoy,ayer):
                           reaccion=reac,etfs=[(e,pct(e)) for e in _etfs_relacionados(r["sym"])]))
     return dict(filas=filas,etf=[(e,pct(e)) for e in _ETFS_REF])
 
-def datos_noticias(pool,limit=5):
-    top=pick_pre_news(pool,limit=limit)
+# ── Noticias v2: solo medios de primer nivel y fuentes oficiales, puntuando el EVENTO, agrupadas por historia ──
+# Medios de primer nivel (estricto). Yahoo Finance, Benzinga, Motley Fool, TipRanks, etc. NO cuentan como fuente.
+_FUENTES_T1=(("reuters","Reuters"),("bloomberg","Bloomberg"),("wall street journal","WSJ"),("wsj","WSJ"),("cnbc","CNBC"),
+             ("associated press","AP"),("ap news","AP"),("financial times","Financial Times"),("marketwatch","MarketWatch"),
+             ("barron","Barron's"),("new york times","The New York Times"))
+_FUENTES_NO=("tv18","awaaz","india")                  # CNBC TV18 / Awaaz son medios indios, no el CNBC de EE. UU.
+
+def _fuente_t1(src):
+    s=(src or "").lower()
+    if any(x in s for x in _FUENTES_NO): return None
+    for k,nombre in _FUENTES_T1:
+        if k in s: return nombre
+    return None
+
+# (patrón, etiqueta, puntos): lo que PASA importa más que quién se menciona
+_EV=[(r"\b(futures|pre-?market|before the bell|stock market today|wall street|dow|s&p 500|nasdaq)\b","MERCADO",3),
+     (r"\b(fed|fomc|powell|rate (cut|hike)s?|interest rates?|minutes)\b","FED",5),
+     (r"\b(cpi|ppi|inflation|pce|jobs report|payrolls?|jobless|unemployment|gdp|retail sales|consumer confidence|ism|pmi)\b","MACRO",4),
+     (r"\b(treasur(y|ies)|bond yields?|yields?)\b","MACRO",3),
+     (r"\b(tariffs?|trade war|sanctions?|export controls?|shutdown|debt ceiling|embargo)\b","POLÍTICA",4),
+     (r"\b(war|ceasefire|missile|iran|israel|ukraine|taiwan|hormuz)\b","GEOPOL.",3),
+     (r"\b(oil|crude|opec)\b","ENERGÍA",2),(r"\b(ipo)\b","IPO",2)]
+_EV_EMPRESA=(r"\b(earnings|results|beats?|misses?|guidance|outlook|raises?|cuts?|downgrad(e|es|ed)|upgrad(e|es|ed)|ceo|resign(s|ed)?|"
+             r"steps? down|acquir(e|es|ed)|acquisition|merger|takeover|bankrupt(cy)?|halt(s|ed)?|recall|fda|lawsuit|probe|investigation|"
+             r"layoffs?|buyback|split|plunge[sd]?|soar(s|ed)?|tumbl(e|es|ed)|jump(s|ed)?|surge[sd]?|slump(s|ed)?|sink(s)?)\b")
+_STOP={"after","with","from","that","this","their","will","over","into","amid","says","said","stock","stocks","shares","market","markets",
+       "today","wall","street","news","what","about","could","would","more","than","have","been","year","week","here","your","they"}
+
+# Política y geopolítica solo cuentan si hablan de algo que toca al mercado; opinión/pódcast/explicadores pesan menos
+_MKT_WORDS=r"\b(stocks?|markets?|oil|crude|gas|dollar|yields?|futures|economy|economic|trade|tariffs?|chips?|semiconductors?|exports?|imports?|bank|banks|inflation|rates?|bonds?|commodit\w+|supply)\b"
+_NEWS_OPINION=r"(cramer|opinion|commentary|what'?s news|podcast|newsletter|explainer|analysts? comment|big trades|how to|why you)"
+_NEWS_PREMKT=r"(pre-?market|futures|before the bell|early trading|opening bell)"
+
+def _score_v2(it,watch_re,core_re):
+    import re
+    hl=(it.get("headline") or "").lower(); sc=0; tags=[]; macro=0
+    for pat,tag,wt in _EV:
+        if re.search(pat,hl): macro+=wt; tags.append(tag)
+    sc+=min(macro,6)
+    w=bool(watch_re.search(hl)); c=bool(core_re.search(hl))
+    ev=bool(re.search(_EV_EMPRESA,hl)); earn=bool(re.search(_NEWS_EARN,hl))
+    if ev and (w or c): sc+=5
+    elif ev: sc+=2
+    sc+=(1 if w else 0)+(1 if c else 0)
+    if re.search(_NEWS_JUNK,hl): sc-=6
+    if re.search(_NEWS_OFFTOPIC,hl) and not (w or c): sc-=3
+    if ("POLÍTICA" in tags or "GEOPOL." in tags) and not re.search(_MKT_WORDS,hl): sc-=4
+    if re.search(_NEWS_PREMKT,hl): sc+=2
+    if re.search(_NEWS_OPINION,hl): sc-=4
+    if it.get("oficial"): sc+=4
+    dt=it.get("dt")
+    if dt:
+        edad=(_utc_now()-dt).total_seconds(); sc+=2 if edad<3*3600 else 1 if edad<6*3600 else 0
+    macro_tags=[t for t in tags if t!="MERCADO"]
+    if earn and (w or c): tag="EARNINGS"
+    elif macro_tags: tag=macro_tags[0]
+    elif w or c: tag="EMPRESA"
+    elif "MERCADO" in tags: tag="MERCADO"
+    else: tag=""
+    return sc,tag
+
+def _toks(h):
+    import re
+    return {w for w in re.findall(r"[a-z0-9]+",(h or "").lower()) if len(w)>3 and w not in _STOP}
+
+def _misma_historia(a,b):
+    i=len(a&b)
+    if not i: return False
+    return (i>=3 and i/min(len(a),len(b))>=0.5) or i/len(a|b)>=0.4
+
+def pick_pre_news_v2(items,limit=8,min_score=5):
+    """Historias (no titulares): agrupa los medios que cuentan lo mismo y muestra cuántas fuentes de primer nivel/oficiales."""
+    watch_re,core_re=_news_regexes(); since=_since_last_close_utc(); cand=[]
+    for it in items:
+        dt=it.get("dt")
+        if not dt or dt<since: continue
+        nombre=it.get("source") if it.get("oficial") else _fuente_t1(it.get("source"))
+        if not nombre: continue                                   # estricto: fuera todo lo que no sea primer nivel u oficial
+        sc,tag=_score_v2(it,watch_re,core_re)
+        if sc>=min_score: cand.append(dict(it,score=sc,tag=(it.get("tag") or tag),fuente=nombre,toks=_toks(it["headline"])))
+    cand.sort(key=lambda x:(x["score"],x["dt"]),reverse=True)
+    hist=[]
+    for it in cand:
+        for h in hist:
+            if _misma_historia(it["toks"],h["toks"]): h["items"].append(it); break
+        else: hist.append(dict(toks=it["toks"],items=[it]))
+    out=[]
+    for h in hist:
+        its=h["items"]; rep=max(its,key=lambda x:(bool(x.get("oficial")),x["score"],x["dt"]))
+        fuentes=[]
+        for x in sorted(its,key=lambda x:x["dt"],reverse=True):
+            if x["fuente"] not in fuentes: fuentes.append(x["fuente"])
+        out.append(dict(rep,fuentes=fuentes,n=len(fuentes),dt=max(x["dt"] for x in its),score=rep["score"]+min(6,2*(len(fuentes)-1))))
+    out.sort(key=lambda x:(x["score"],x["dt"]),reverse=True)
+    kept=[]; por={}
+    for it in out:                                                 # diversidad: como mucho 3 historias por empresa/tema
+        hl=it["headline"].lower(); ent=core_re.search(hl) or watch_re.search(hl)
+        clave=ent.group(1).lower() if ent else (it["tag"] or "otra")
+        if por.get(clave,0)>=3: continue
+        por[clave]=por.get(clave,0)+1; kept.append(it)
+        if len(kept)>=limit: break
+    return kept
+
+# ── Fuentes oficiales ───────────────────────────────────────────────────────────────────────────
+def fetch_fed_items(since):
+    """Notas de política monetaria y discursos de la Fed (RSS oficial)."""
+    out=[]
+    for feed in ("press_monetary","speeches_and_testimony"):
+        try:
+            r=requests.get(f"https://www.federalreserve.gov/feeds/{feed}.xml",headers=_pre_headers("https://www.federalreserve.gov/"),timeout=12)
+            r.raise_for_status()
+            for x in _parse_rss_items(r.content):
+                if x.get("dt") and x["dt"]>=since:
+                    out.append(dict(x,source="Federal Reserve",oficial=True,tag="FED",is_pr=False,origin="Fed"))
+        except Exception: pass
+    return out
+
+_SEC_ITEMS={"1.01":"acuerdo relevante","1.03":"quiebra o concurso","2.01":"adquisición o venta de activos","2.02":"resultados",
+            "2.05":"reestructuración y costes","2.06":"deterioro de activos","3.01":"aviso de exclusión de bolsa",
+            "4.02":"cuentas no fiables (reformulación)","5.01":"cambio de control","5.02":"cambios en directivos o consejo"}
+_SEC_CIK={}
+
+def fetch_sec_8k(tickers,since):
+    """8-K de la SEC con asuntos que mueven precio, de las empresas dadas. Necesita la variable SEC_USER_AGENT
+    (la SEC exige un contacto en la cabecera). Devuelve (items, nota)."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    ua=os.environ.get("SEC_USER_AGENT","").strip()
+    if not ua: return [],"8-K de la SEC no activado: falta la variable SEC_USER_AGENT"
+    hdr={"User-Agent":ua,"Accept-Encoding":"gzip, deflate"}
+    try:
+        if not _SEC_CIK:
+            r=requests.get("https://www.sec.gov/files/company_tickers.json",headers=hdr,timeout=20); r.raise_for_status()
+            for v in r.json().values(): _SEC_CIK[v["ticker"].upper()]=str(v["cik_str"]).zfill(10)
+    except Exception as e: return [],f"SEC no disponible ({type(e).__name__})"
+    def uno(t):
+        cik=_SEC_CIK.get(t.upper())
+        if not cik: return []
+        time.sleep(0.15)                                          # la SEC permite hasta 10 peticiones/s
+        try:
+            r=requests.get(f"https://data.sec.gov/submissions/CIK{cik}.json",headers=hdr,timeout=15); r.raise_for_status()
+            rec=r.json()["filings"]["recent"]
+        except Exception: return []
+        res=[]
+        for i,forma in enumerate(rec.get("form",[])):
+            if forma not in ("8-K","8-K/A"): continue
+            try: dt=datetime.datetime.strptime(rec["acceptanceDateTime"][i][:19],"%Y-%m-%dT%H:%M:%S")
+            except Exception: continue
+            if dt<since: break                                    # los filings vienen del más nuevo al más antiguo
+            items=[x.strip() for x in (rec["items"][i] or "").split(",") if x.strip() in _SEC_ITEMS]
+            if not items: continue
+            acc=rec["accessionNumber"][i]; doc=rec["primaryDocument"][i]
+            desc="; ".join(f"{_SEC_ITEMS[x]} (Item {x})" for x in items)
+            res.append(dict(headline=f"{t.upper()}: 8-K — {desc}",dt=dt,source="SEC (8-K)",oficial=True,tag="8-K",es=True,is_pr=False,origin="SEC",
+                            link=f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc.replace('-','')}/{doc}"))
+        return res
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        out=[x for lst in ex.map(uno,list(dict.fromkeys(tickers))) for x in lst]
+    return out,""
+
+def fetch_pre_oficiales(tickers):
+    since=_since_last_close_utc(); items=fetch_fed_items(since); notas=[]
+    sec,nota=fetch_sec_8k(tickers,since); items+=sec
+    if nota: notas.append(nota)
+    return items,notas
+
+def datos_noticias(pool,limit=8,extra=()):
+    top=pick_pre_news_v2(list(pool)+list(extra),limit=limit)
     if not top: return []
     top=sorted(top,key=lambda x:x["dt"],reverse=True)
-    try: es=translate_headlines([x["headline"] for x in top])
-    except Exception: es=[x["headline"] for x in top]
-    out=[]
-    for it,txt in zip(top,es):
+    idx=[i for i,x in enumerate(top) if not x.get("es")]
+    try: tr=translate_headlines([top[i]["headline"] for i in idx])
+    except Exception: tr=[top[i]["headline"] for i in idx]
+    txt=dict(zip(idx,tr)); out=[]
+    for i,it in enumerate(top):
         e=_utc_to_et(it["dt"])
-        out.append(dict(hora=f"{_DIAS_ES[e.weekday()]} {e:%H:%M}",tag=it["tag"] or "OTRA",texto=txt,
-                        fuente=it.get("source") or it.get("origin","")))
+        out.append(dict(hora=f"{_DIAS_ES[e.weekday()]} {e:%H:%M}",tag=it["tag"] or "OTRA",texto=txt.get(i,it["headline"]),
+                        fuente=", ".join(it["fuentes"]),fuentes=it["fuentes"],n=it["n"],link=it.get("link",""),oficial=bool(it.get("oficial"))))
     return out
+
+# ── Búsqueda dirigida a medios de primer nivel (la consulta general de Google News trae poco de ellos) ──
+_T1_SITES=("reuters.com","bloomberg.com","wsj.com","cnbc.com","apnews.com","ft.com","marketwatch.com","barrons.com","nytimes.com")
+_T1_TEMAS='(stocks OR futures OR premarket OR "Wall Street" OR Fed OR inflation OR tariffs OR sanctions OR earnings OR oil OR yields)'
+
+def fetch_pre_news_t1(extra_names=()):
+    """Google News restringido a cada medio de primer nivel (operador site:) + las empresas del día."""
+    from concurrent.futures import ThreadPoolExecutor
+    from urllib.parse import quote_plus
+    def rss(q):
+        try:
+            r=requests.get("https://news.google.com/rss/search?q="+quote_plus(q+" when:1d")+"&hl=en-US&gl=US&ceid=US:en",headers=_pre_headers(),timeout=12)
+            r.raise_for_status(); its=_parse_rss_items(r.content)
+            for x in its: x["origin"]="Google-T1"; x["is_pr"]=False
+            return its
+        except Exception: return []
+    qs=[f"{_T1_TEMAS} site:{s}" for s in _T1_SITES]
+    sitios=" OR ".join(f"site:{s}" for s in _T1_SITES[:5])
+    qs+=[f'"{n}" ({sitios})' for n in list(extra_names)[:6]]
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        return [x for lst in ex.map(rss,qs) for x in lst]
 
 def datos_agenda():
     agenda,err,fuente=fetch_pre_agenda()
@@ -2631,22 +2819,38 @@ def datos_earnings_proximos(cal,cal_ok,hoy):
     vistos={f["sym"] for f in filas}
     return dict(ok=True,filas=filas,falta=[t for t in ["AAPL","MSFT","NVDA","AMZN","GOOGL","META","TSLA"] if t not in vistos])
 
-def datos_splits(hoy,dias=30,max_filas=14):
+SPLITS_CAP_MEGA=200e9        # capitalización mínima para ser "mega cap" (200.000 M$)
+
+def _caps_mercado(syms):
+    """{símbolo: capitalización en $ o None} (yfinance). En paralelo y tolerante a fallos."""
+    from concurrent.futures import ThreadPoolExecutor
+    import yfinance as yf
+    def uno(s):
+        try:
+            fi=yf.Ticker(_ysym(s)).fast_info
+            v=getattr(fi,"market_cap",None)
+            if v is None: v=fi["market_cap"]
+            return s,float(v)
+        except Exception: return s,None
+    with ThreadPoolExecutor(max_workers=6) as ex: return dict(ex.map(uno,list(dict.fromkeys(syms))))
+
+def datos_splits(hoy,dias=30,max_filas=12):
+    """Próximos splits SOLO de mega caps (capitalización >= SPLITS_CAP_MEGA o presentes en _GRANDES) y de tus tickers
+    (tickers.txt). El resto (microcaps, ETF apalancados desconocidos...) se oculta y solo se cuenta."""
     sp=fetch_splits()
-    if sp is None: return dict(ok=False,filas=[],mas=0,etf=None,dias=dias)
-    mios=_mis_tickers()|set(_EARNINGS)|set(_EARNINGS_ETF)|set(_GRANDES)
+    if sp is None: return dict(ok=False,filas=[],ocultos=0,dias=dias)
+    suyos=_mis_tickers()
     prox=[x for x in sp if hoy<=x[0]<=hoy+datetime.timedelta(days=dias)]
-    # Los ETF apalancados de Leverage Shares/Themes hacen muchos splits a la vez: se resumen en una línea.
-    etf=[x for x in prox if x[1] not in mios and ("leverage shares" in x[2].lower() or "etf trust" in x[2].lower())]
-    prox=[x for x in prox if x not in etf]
-    prox.sort(key=lambda x:(x[1] not in mios,x[0],x[1]))               # primero los tuyos, luego por fecha
-    filas=[dict(fecha=d,sym=s,nombre=n,ratio=r,tipo=t,suyo=s in mios) for d,s,n,r,t in prox[:max_filas]]
-    res=None
-    if etf:
-        fechas=sorted({x[0] for x in etf})
-        res=dict(n=len(etf),tipos="/".join(sorted({x[4].lower() for x in etf})),fechas=(fechas[0],fechas[-1]),
-                 tickers=[x[1] for x in etf[:8]],mas=len(etf)>8)
-    return dict(ok=True,filas=filas,mas=max(0,len(prox)-max_filas),etf=res,dias=dias)
+    fondo=lambda n:any(k in n.lower() for k in ("etf","trust","fund","leverage shares"))
+    consultar=[x[1] for x in prox if x[1] not in _GRANDES and x[1] not in suyos and not fondo(x[2])]
+    caps=_caps_mercado(consultar)
+    filas=[]
+    for d,s,n,r,t in prox:
+        cap=caps.get(s)
+        if s in _GRANDES or s in suyos or (cap is not None and cap>=SPLITS_CAP_MEGA):
+            filas.append(dict(fecha=d,sym=s,nombre=_limpia_nombre(n),ratio=r,tipo=t,suyo=s in suyos,cap=cap))
+    filas.sort(key=lambda x:(x["fecha"],x["sym"]))
+    return dict(ok=True,filas=filas[:max_filas],ocultos=len(prox)-len(filas),dias=dias)
 
 def reunir_premarket(debug=False):
     """Recoge TODOS los datos del resumen premarket en un diccionario (sin imprimir nada)."""
@@ -2656,9 +2860,13 @@ def reunir_premarket(debug=False):
     cal,cal_ok=fetch_nasdaq_earnings([ayer]+[hoy+datetime.timedelta(days=i) for i in range(7)])
     base=[r for r in cal.get(ayer,[]) if r["hora"]!="BO"]+cal.get(hoy,[])
     foco=[r for r,_ in _seleccion_grandes(base)][:10]
-    pool,conteo=fetch_pre_news_pool(extra_names=[_nombre_corto(r) for r in foco],extra_tickers=[_ysym(r["sym"]) for r in foco[:8]])
+    nombres=[_nombre_corto(r) for r in foco]
+    pool,conteo=fetch_pre_news_pool(extra_names=nombres,extra_tickers=[_ysym(r["sym"]) for r in foco[:8]])
+    pool=pool+fetch_pre_news_t1(extra_names=nombres)                                  # búsqueda dirigida a medios de primer nivel
+    tickers_sec=[_ysym(t) for t in (set(_GRANDES)|_mis_tickers()|{r["sym"] for r in foco}) if t not in _EARNINGS_ETF]
+    oficiales,notas_noticias=fetch_pre_oficiales(tickers_sec)                          # Fed y 8-K de la SEC
     return dict(et=et,hoy=hoy,ayer=ayer,fut=fut,live=live,info=info,avisos=avisos,cal_ok=cal_ok,
-                noticias=datos_noticias(pool),
+                noticias=datos_noticias(pool,limit=8,extra=oficiales),noticias_nota=notas_noticias,
                 earnings=(datos_earnings_recientes(cal,hoy,ayer) if cal_ok else None),
                 agenda=datos_agenda(),proximos=datos_earnings_proximos(cal,cal_ok,hoy),splits=datos_splits(hoy),
                 debug=dict(filas_por_dia={str(d):len(v) for d,v in cal.items()},noticias_origen=conteo))
@@ -2721,24 +2929,21 @@ def print_pre_earnings_proximos(P,hoy):
     if P["falta"]: print(f"  {Fore.LIGHTBLACK_EX}Sin earnings en la ventana: {', '.join(P['falta'])}{Style.RESET_ALL}")
 
 def print_pre_splits(S,hoy):
-    print(f"\n{Fore.CYAN}05{Style.RESET_ALL}  {Fore.YELLOW}{Style.BRIGHT}PRÓXIMOS SPLITS — {S['dias']} DÍAS (directos e inversos){Style.RESET_ALL}")
+    print(f"\n{Fore.CYAN}05{Style.RESET_ALL}  {Fore.YELLOW}{Style.BRIGHT}PRÓXIMOS SPLITS — {S['dias']} DÍAS (MEGA CAPS Y TUS TICKERS){Style.RESET_ALL}")
     if not S["ok"]:
         print(f"  {Fore.RED}Calendario de splits del Nasdaq no disponible ahora mismo.{Style.RESET_ALL}"); return
-    if not S["filas"] and not S["etf"]:
-        print(f"  {Fore.LIGHTBLACK_EX}Sin splits anunciados en los próximos {S['dias']} días.{Style.RESET_ALL}"); return
-    print(f"  {Style.BRIGHT}{'FECHA':<11}{'TICKER':<8}{'TIPO':<15}{'RATIO':<9}EMPRESA{Style.RESET_ALL}")
-    print("  "+"-"*78)
-    for x in S["filas"]:
-        cd=Fore.YELLOW+Style.BRIGHT if x["fecha"]==hoy else ""
-        ct=Fore.RED if x["tipo"]=="INVERSO" else Fore.GREEN if x["tipo"]=="DIRECTO" else ""
-        print(f"  {cd}{('HOY' if x['fecha']==hoy else _dia_es(x['fecha'])):<11}{Style.RESET_ALL}{Style.BRIGHT if x['suyo'] else ''}{x['sym']:<8}{Style.RESET_ALL}"
-              f"{ct}{x['tipo']:<15}{Style.RESET_ALL}{x['ratio']:<9}{_trim(x['nombre'],44)}"+(f" {Fore.CYAN}★ tuyo{Style.RESET_ALL}" if x["suyo"] else ""))
-    if S["mas"]: print(f"  {Fore.LIGHTBLACK_EX}… y {S['mas']} más (se muestran primero los tuyos, luego por fecha).{Style.RESET_ALL}")
-    e=S["etf"]
-    if e:
-        cuando=_dia_es(e["fechas"][0]) if e["fechas"][0]==e["fechas"][1] else f"{_dia_es(e['fechas'][0])} – {_dia_es(e['fechas'][1])}"
-        print(f"  {Fore.LIGHTBLACK_EX}+ {e['n']} ETF apalancados (Leverage Shares/Themes) con split {e['tipos']} el {cuando}: "
-              f"{', '.join(e['tickers'])}{'…' if e['mas'] else ''}{Style.RESET_ALL}")
+    if not S["filas"]:
+        print(f"  {Fore.LIGHTBLACK_EX}Sin splits de mega caps (≥{SPLITS_CAP_MEGA/1e9:.0f} mil M$) ni de tus tickers en los próximos {S['dias']} días.{Style.RESET_ALL}")
+    else:
+        print(f"  {Style.BRIGHT}{'FECHA':<11}{'TICKER':<8}{'TIPO':<15}{'RATIO':<9}{'CAP.':>8}  EMPRESA{Style.RESET_ALL}")
+        print("  "+"-"*78)
+        for x in S["filas"]:
+            cd=Fore.YELLOW+Style.BRIGHT if x["fecha"]==hoy else ""
+            ct=Fore.RED if x["tipo"]=="INVERSO" else Fore.GREEN if x["tipo"]=="DIRECTO" else ""
+            cap=_n(x["cap"]/1e9,1) if x["cap"] else "—"
+            print(f"  {cd}{('HOY' if x['fecha']==hoy else _dia_es(x['fecha'])):<11}{Style.RESET_ALL}{Style.BRIGHT}{x['sym']:<8}{Style.RESET_ALL}"
+                  f"{ct}{x['tipo']:<15}{Style.RESET_ALL}{x['ratio']:<9}{cap:>8}  {_trim(x['nombre'],36)}"+(f" {Fore.CYAN}★ tuyo{Style.RESET_ALL}" if x["suyo"] else ""))
+    if S["ocultos"]: print(f"  {Fore.LIGHTBLACK_EX}{S['ocultos']} splits de empresas pequeñas ocultos (solo se muestran mega caps y tus tickers). CAP. en miles de millones de $.{Style.RESET_ALL}")
     print(f"  {Fore.LIGHTBLACK_EX}Ratio A : B = A acciones nuevas por B antiguas (1 : 10 = inverso, 3 : 1 = directo). Fuente: Nasdaq.{Style.RESET_ALL}")
 
 def imprimir_premarket(D,debug=False):
@@ -2763,14 +2968,17 @@ def imprimir_premarket(D,debug=False):
     for d,txt,col in D["avisos"]:
         print(f"  {col}{Style.BRIGHT}⚠ {_dia_es(d)}: {txt}{Style.RESET_ALL}")
 
-    print(f"\n{Fore.CYAN}01{Style.RESET_ALL}  {Fore.YELLOW}{Style.BRIGHT}NOTICIAS QUE MUEVEN LA APERTURA (desde el cierre de ayer · las más recientes primero){Style.RESET_ALL}")
+    print(f"\n{Fore.CYAN}01{Style.RESET_ALL}  {Fore.YELLOW}{Style.BRIGHT}NOTICIAS QUE MUEVEN LA APERTURA (medios de primer nivel y oficiales · las más recientes primero){Style.RESET_ALL}")
     if D["noticias"]:
-        ancho=max(60,_ancho()-34)
+        ancho=max(60,_ancho()-46)
         for n in D["noticias"]:
             col=Fore.YELLOW if n["tag"]=="EARNINGS" else Fore.CYAN
-            print(f"  {Fore.LIGHTBLACK_EX}{n['hora']} ET{Style.RESET_ALL} {col}[{n['tag']:<9}]{Style.RESET_ALL} {_trim(n['texto'],ancho)} {Fore.LIGHTBLACK_EX}({n['fuente']}){Style.RESET_ALL}")
+            fu=n["fuente"]+(f" · {n['n']} fuentes" if n["n"]>1 else "")
+            print(f"  {Fore.LIGHTBLACK_EX}{n['hora']} ET{Style.RESET_ALL} {col}[{n['tag']:<9}]{Style.RESET_ALL} {_trim(n['texto'],ancho)} {Fore.LIGHTBLACK_EX}({fu}){Style.RESET_ALL}")
     else:
         print(f"  {Fore.LIGHTBLACK_EX}Nada relevante desde el cierre de ayer según los filtros (macro, earnings, tus empresas).{Style.RESET_ALL}")
+    for nota in D.get("noticias_nota",[]):
+        print(f"  {Fore.LIGHTBLACK_EX}ℹ {nota}{Style.RESET_ALL}")
 
     print_pre_earnings_recientes(D["earnings"])
     print_pre_agenda(D["agenda"])

@@ -1,6 +1,6 @@
 """
-Genera docs/premarket/index.html con el resumen de `get-info.py --pre` en formato web (tarjetas) para GitHub Pages.
-Usa los MISMOS datos que la terminal (get-info.py: reunir_premarket) y añade al final la versión texto.
+Genera docs/premarket/index.html con el resumen de `get-info.py --pre` en formato web compacto (pensado para móvil)
+para publicarlo en GitHub Pages. Usa los MISMOS datos que la terminal (get-info.py: reunir_premarket).
 
 Solo publica en las 3 franjas de antes de la apertura (hora de Nueva York), de lunes a viernes y sin festivos:
     8:00   8:30   9:15      (el mercado abre a las 9:30 ET)
@@ -14,11 +14,9 @@ Uso:
     python publicar_premarket.py --forzar --salida X   # escribe en otra carpeta (para probar sin tocar docs/premarket)
 """
 import argparse
-import contextlib
 import datetime
 import html
 import importlib.util
-import io
 import json
 import os
 import re
@@ -63,55 +61,6 @@ def cargar_get_info():
     return mod
 
 
-# ── ANSI -> HTML (solo para la version texto del final) ────────────────────────────────────────
-_COLOR = {30: "k", 31: "r", 32: "g", 33: "y", 34: "b", 35: "m", 36: "c", 37: "w",
-          90: "gr", 91: "r", 92: "g", 93: "y", 94: "b", 95: "m", 96: "c", 97: "w"}
-_SGR = re.compile(r"\x1b\[([0-9;]*)m")
-
-
-def ansi_a_html(texto):
-    """Convierte los codigos de color de colorama en <span>. Reinicia el estilo en cada salto de linea
-    (en la terminal lo hace colorama con autoreset=True)."""
-    color, negrita = None, False
-    out = []
-
-    def trozo(s):
-        if not s:
-            return
-        s = html.escape(s)
-        clases = ([color] if color else []) + (["B"] if negrita else [])
-        out.append('<span class="' + " ".join(clases) + '">' + s + "</span>" if clases else s)
-
-    pos = 0
-    for m in _SGR.finditer(texto):
-        partes = (texto[pos:m.start()]).split("\n")
-        for i, p in enumerate(partes):
-            trozo(p)
-            if i < len(partes) - 1:
-                out.append("\n")
-                color, negrita = None, False
-        pos = m.end()
-        for code in (m.group(1) or "0").split(";"):
-            n = int(code or 0)
-            if n == 0:
-                color, negrita = None, False
-            elif n == 1:
-                negrita = True
-            elif n == 22:
-                negrita = False
-            elif n in _COLOR:
-                color = _COLOR[n]
-            elif n == 39:
-                color = None
-    partes = texto[pos:].split("\n")
-    for i, p in enumerate(partes):
-        trozo(p)
-        if i < len(partes) - 1:
-            out.append("\n")
-            color, negrita = None, False
-    return "".join(out)
-
-
 # ── Helpers de formato ──────────────────────────────────────────────────────────────────────────
 def esc(x):
     return html.escape("" if x is None else str(x))
@@ -120,6 +69,8 @@ def esc(x):
 def pct(v, dec=1):
     if v is None:
         return "n/d"
+    if round(v, dec) == 0:                      # "−0,0 %" confunde: un valor que redondea a cero va sin signo
+        return num(0, dec) + " %"
     return f"{v:+.{dec}f}".replace(".", ",").replace("-", "−") + " %"
 
 
@@ -127,288 +78,234 @@ def num(x, dec=2):
     return f"{x:.{dec}f}".replace(".", ",")
 
 
-def signo(v, tol=0.0):
+def sg(v, tol=0.0):
+    """Clase de color: p (verde), n (rojo), w (neutro/amarillo), g (sin dato)."""
     if v is None:
-        return "nd"
-    return "pos" if v > tol else "neg" if v < -tol else "neu"
+        return "g"
+    return "p" if v > tol else "n" if v < -tol else "w"
 
 
-def dia_corto(d):
+def dia(d):
     return f"{DIAS[d.weekday()]} {d.day} {MESES[d.month - 1]}"
 
 
 def cap_txt(c):
-    return num(c / 1e9, 1) + " mil M$"
+    return num(c / 1e9, 1) + " mM$" if c else ""
 
 
-def vacio(msg, nivel=""):
-    return f'<p class="vacio {nivel}">{esc(msg)}</p>'
+def chip(txt, cls=""):
+    return f'<i class="ch {cls}">{esc(txt)}</i>'
+
+
+def vacio(msg, cls=""):
+    return f'<p class="ev0 {cls}">{esc(msg)}</p>'
+
+
+def sec(titulo, cuerpo, nota=""):
+    n = f'<p class="nt">{esc(nota)}</p>' if nota else ""
+    return f"<section><h2>{esc(titulo)}</h2>{cuerpo}{n}</section>"
+
+
+def lista(filas_html):
+    return f'<div class="ls">{"".join(filas_html)}</div>'
 
 
 # ── Secciones ───────────────────────────────────────────────────────────────────────────────────
+_CORTO = {"S&P 500": "S&P 500", "NASDAQ 100": "Nasdaq 100", "RUSSELL 2000": "Russell 2000", "DOW": "Dow"}
+
+
 def h_futuros(D):
-    tarjetas = []
-    for (nombre, p), i in zip(D["fut"], D["info"]):
-        tarjetas.append(
-            f'<div class="card metric {signo(p)}"><div class="lbl">{esc(nombre)}</div>'
-            f'<div class="big">{pct(p, 2)}</div><div class="sub">dato de las {esc(i["hora"] or "n/d")} ET</div></div>')
+    tarjetas = "".join(
+        f'<div class="cd mt {sg(p)}"><span class="lb">{esc(_CORTO.get(n, n))}</span><b>{pct(p, 2)}</b>'
+        f'<span class="lb">{esc(i["hora"] or "n/d")} ET</span></div>'
+        for (n, p), i in zip(D["fut"], D["info"]))
     edades = [i["age"] for i in D["info"] if i["age"] is not None]
-    nota = "Variación vs liquidación del día anterior · futuros CME vía Yahoo"
-    if edades:
-        nota += f" · retraso ≈{min(edades):.0f} min"
-    titulo = "Futuros" if D["live"] else "Futuros — mercado cerrado / última sesión"
+    nota = "Vs liquidación del día anterior · futuros CME vía Yahoo" + (f" · retraso ≈{min(edades):.0f} min" if edades else "")
     avisos = "".join(
-        f'<div class="aviso {"rojo" if "CERRADO" in txt else "amarillo"}">⚠ <b>{esc(dia_corto(d))}</b>: {esc(txt)}</div>'
-        for d, txt, _ in D["avisos"])
-    return (f'<section><h2>{esc(titulo)}</h2><div class="grid g4">{"".join(tarjetas)}</div>'
-            f'<p class="nota">{esc(nota)}</p>{avisos}</section>')
+        f'<div class="av {"n" if "CERRADO" in txt else "w"}">⚠ <b>{esc(dia(d))}</b> · {esc(txt)}</div>' for d, txt, _ in D["avisos"])
+    return sec("Futuros" if D["live"] else "Futuros · mercado cerrado", f'<div class="g4">{tarjetas}</div>{avisos}', nota)
 
 
-_TAG = {"EARNINGS": "y", "MACRO": "b", "FED": "m", "POLÍTICA": "o", "ENERGÍA": "o", "GEOPOL.": "r", "IPO": "m",
-        "EMPRESA": "c", "MERCADO": "c"}
+_TAG = {"EARNINGS": "w", "MACRO": "a", "FED": "m", "POLÍTICA": "w", "ENERGÍA": "w", "GEOPOL.": "n", "IPO": "m",
+        "EMPRESA": "a", "MERCADO": "a", "8-K": "m"}
 
 
 def h_noticias(D):
     if not D["noticias"]:
-        cuerpo = vacio("Nada relevante desde el cierre de ayer según los filtros (macro, earnings, tus empresas).")
-    else:
-        items = "".join(
-            f'<li class="noticia"><div class="nt"><span class="hora">{esc(n["hora"])} ET</span>'
-            f'<span class="chip {_TAG.get(n["tag"], "n")}">{esc(n["tag"])}</span></div>'
-            f'<div class="tx">{esc(n["texto"])}<span class="fuente"> — {esc(n["fuente"])}</span></div></li>'
-            for n in D["noticias"])
-        cuerpo = f'<ul class="noticias">{items}</ul>'
-    return f'<section><h2>Noticias que mueven la apertura</h2><p class="nota">Desde el cierre de ayer · las más recientes primero</p>{cuerpo}</section>'
+        return sec("Noticias que mueven la apertura", vacio("Nada relevante desde el cierre de ayer según los filtros."),
+                   " ".join(D.get("noticias_nota", [])))
+    filas = []
+    for n in D["noticias"]:
+        fuentes = n.get("fuentes") or ([n["fuente"]] if n.get("fuente") else [])
+        meta = f'{esc(n["hora"])} ET {chip(n["tag"], _TAG.get(n["tag"], ""))}'
+        if n.get("n", 1) > 1:
+            meta += f' {chip(str(n["n"]) + " fuentes", "p")}'
+        txt = esc(n["texto"])
+        if n.get("link"):
+            txt = f'<a href="{esc(n["link"])}" target="_blank" rel="noopener">{txt}</a>'
+        filas.append(f'<div class="nw"><div class="mm">{meta}</div><div>{txt} <span class="fu">{esc(", ".join(fuentes))}</span></div></div>')
+    nota = "Medios de primer nivel y fuentes oficiales · desde el cierre de ayer · las más recientes primero. " + " ".join(D.get("noticias_nota", []))
+    return sec("Noticias que mueven la apertura", lista(filas), nota.strip())
 
 
 def h_earnings(D):
     E = D["earnings"]
-    t = '<h2>Earnings de ayer (AC) y hoy (BO) — las grandes</h2>'
+    t = "Earnings de ayer (AC) y hoy (BO) · las grandes"
     if E is None:
-        return f'<section>{t}{vacio("Calendario del Nasdaq no disponible ahora mismo; no puedo saber quién reportó.", "rojo")}</section>'
+        return sec(t, vacio("Calendario del Nasdaq no disponible ahora mismo.", "n"))
     if not E["filas"]:
-        return f'<section>{t}{vacio("Ninguna de las grandes (ni el top 10 por capitalización) reportó ayer tras el cierre ni reporta hoy antes de abrir.")}</section>'
-    etf = "".join(
-        f'<div class="etf {signo(p)}"><span class="lbl">{esc(e)}</span><b>{pct(p)}</b></div>' for e, p in E["etf"])
+        return sec(t, vacio("Ninguna de las grandes (ni el top 10 por capitalización) reportó ayer tras el cierre ni reporta hoy antes de abrir."))
+    etf = "".join(f'<span class="et {sg(p)}">{esc(e)} <b>{pct(p)}</b></span>' for e, p in E["etf"])
     cards = []
     for f in E["filas"]:
         v, r = f["resultado"], f["reaccion"]
         if v:
-            det = f'EPS {num(v["eps"])} vs {num(v["cons"])}'
-            sub = (pct(v["pct"], 0) + " vs consenso") if v["pct"] is not None else "consenso 0"
-            if v["fuente"] == "calendario":
-                sub += " ~"
-            caja_res = (f'<div class="box {signo(v["dif"], 0.005)}"><span class="k">Resultado</span>'
-                        f'<b>{esc(det)}</b><small>{esc(sub)}</small></div>')
+            sub = (pct(v["pct"], 0) + " vs cons.") if v["pct"] is not None else "cons. 0"
+            res = f'<div class="bx {sg(v["dif"], 0.005)}"><span class="lb">Resultado</span><b>EPS {num(v["eps"])} vs {num(v["cons"])}</b><span class="lb">{esc(sub)}{" ~" if v["fuente"] == "calendario" else ""}</span></div>'
         else:
-            caja_res = '<div class="box nd"><span class="k">Resultado</span><b>pendiente</b><small>sin dato aún</small></div>'
+            res = '<div class="bx g"><span class="lb">Resultado</span><b>pendiente</b><span class="lb">sin dato aún</span></div>'
         if r:
             et = {"after-hours": "after-hours", "premarket": "premarket", "regular": "sesión"}.get(r["fuente"], r["fuente"])
-            caja_rea = (f'<div class="box {signo(r["pct"])}"><span class="k">Reacción</span>'
-                        f'<b>{pct(r["pct"])}</b><small>{esc(et)} {esc(r["hora"])}</small></div>')
+            rea = f'<div class="bx {sg(r["pct"])}"><span class="lb">Reacción</span><b>{pct(r["pct"])}</b><span class="lb">{esc(et)} {esc(r["hora"])}</span></div>'
         else:
-            caja_rea = '<div class="box nd"><span class="k">Reacción</span><b>n/d</b><small>sin precio</small></div>'
+            rea = '<div class="bx g"><span class="lb">Reacción</span><b>n/d</b><span class="lb">sin precio</span></div>'
         rel = ""
         if f["etfs"]:
-            rel = ('<div class="rel"><span class="k">pesa en</span>' + "".join(
-                f'<span class="chip {signo(p)}">{esc(e)} {pct(p)}</span>' for e, p in f["etfs"]) + "</div>")
-        top = '<span class="chip n" title="Entra por capitalización">★ top 10</span>' if f["extra"] else ""
+            rel = '<div class="rl">' + "".join(f'<span class="et {sg(p)}">{esc(e)} <b>{pct(p)}</b></span>' for e, p in f["etfs"]) + "</div>"
+        top = chip("★ top 10") if f["extra"] else ""
         cards.append(
-            f'<article class="card emp"><header><span class="tk">{esc(f["sym"])}</span>'
-            f'<span class="nm">{esc(f["nombre"])}</span></header>'
-            f'<div class="meta2"><span class="chip y">{esc(f["tag"])}</span>{top}<span class="cap">{cap_txt(f["cap"])}</span></div>'
-            f'<div class="duo">{caja_res}{caja_rea}</div>{rel}</article>')
-    nota = ("Resultado: EPS frente al consenso (verde = mejor, rojo = peor). Reacción: precio ahora frente al cierre de ayer. "
-            "«~» = cifra del calendario del Nasdaq: puede mezclar EPS GAAP y ajustado; contrástala con la nota de la empresa.")
-    return (f'<section>{t}<div class="etfs"><span class="k">ETF de referencia</span>{etf}</div>'
-            f'<div class="grid cards">{"".join(cards)}</div><p class="nota">{esc(nota)}</p></section>')
+            f'<article class="cd em"><div class="hd"><b class="tk">{esc(f["sym"])}</b><span class="nm">{esc(f["nombre"])}</span>'
+            f'{chip(f["tag"], "w")}{top}<span class="cp">{cap_txt(f["cap"])}</span></div>'
+            f'<div class="du">{res}{rea}</div>{rel}</article>')
+    nota = "Resultado: EPS vs consenso. Reacción: precio ahora vs cierre de ayer. «~»: cifra del calendario del Nasdaq (puede mezclar EPS GAAP y ajustado). Cap. en miles de millones de $."
+    return sec(t, f'<div class="etr"><span class="lb">ETF</span>{etf}</div><div class="gc">{"".join(cards)}</div>', nota)
 
 
-def _tabla_por_dias(filas, cabecera, celdas, ncols):
+def _por_dias(filas, fila_html):
     out, ult = [], None
     for x in filas:
         if x["fecha"] != ult:
-            out.append(f'<tr class="dia"><th colspan="{ncols}">{esc(dia_corto(x["fecha"]))}</th></tr>')
+            out.append(f'<div class="dy">{esc(dia(x["fecha"]))}</div>')
             ult = x["fecha"]
-        out.append(celdas(x))
-    return (f'<div class="tabla"><table><thead><tr>{cabecera}</tr></thead><tbody>{"".join(out)}</tbody></table></div>')
+        out.append(fila_html(x))
+    return lista(out)
 
 
 def h_agenda(D):
     A = D["agenda"]
-    t = '<h2>Agenda USA — alto impacto ★★★ · próximos 7 días (ET)</h2>'
+    t = "Agenda USA · alto impacto ★★★ · 7 días (ET)"
     if not A["filas"]:
-        cuerpo = vacio(A["err"], "rojo") if A["err"] else vacio("Sin eventos USA de alto impacto en los próximos 7 días.")
-    else:
-        def fila(x):
-            aviso = f' <span class="chip {x["nivel"] or "n"}">{esc(x["aviso"])}</span>' if x["aviso"] else ""
-            return (f'<tr class="{x["nivel"]}"><td class="hora">{esc(x["hora"])}</td><td>{esc(x["evento"])}{aviso}</td>'
-                    f'<td class="n">{esc(x["actual"])}</td><td class="n">{esc(x["cons"])}</td><td class="n">{esc(x["ant"])}</td></tr>')
-        cuerpo = _tabla_por_dias(A["filas"], '<th>Hora</th><th>Evento</th><th class="n">Actual</th><th class="n">Cons.</th><th class="n">Ant.</th>', fila, 5)
-        if A["err"]:
-            cuerpo += vacio(f'Aviso: {A["err"]}; usando {A["fuente"]}.', "amarillo")
-    return f"<section>{t}{cuerpo}</section>"
+        return sec(t, vacio(A["err"], "n") if A["err"] else vacio("Sin eventos USA de alto impacto en los próximos 7 días."))
+
+    def fila(x):
+        nums = []
+        if x["actual"]:
+            nums.append(f'<b>{esc(x["actual"])}</b>')
+        if x["cons"]:
+            nums.append(f'C {esc(x["cons"])}')
+        if x["ant"]:
+            nums.append(f'A {esc(x["ant"])}')
+        aviso = " " + chip(x["aviso"], "n" if x["nivel"] == "rojo" else "w") if x["aviso"] else ""
+        return (f'<div class="ev {"r" if x["nivel"] == "rojo" else "y" if x["nivel"] == "amarillo" else ""}">'
+                f'<span class="hr">{esc(x["hora"])}</span><span>{esc(x["evento"])}{aviso}</span>'
+                f'<span class="nu">{" · ".join(nums)}</span></div>')
+    nota = "Cifras: actual (negrita) · C = consenso · A = anterior."
+    if A["err"]:
+        nota += f' Aviso: {A["err"]}; usando {A["fuente"]}.'
+    return sec(t, _por_dias(A["filas"], fila), nota)
 
 
 def h_proximos(D):
     P = D["proximos"]
-    t = '<h2>Earnings — próximos 7 días · las grandes + top 10 por capitalización</h2>'
+    t = "Earnings · próximos 7 días · las grandes + top 10"
     if not P["ok"]:
-        return f'<section>{t}{vacio("Calendario del Nasdaq no disponible ahora mismo.", "rojo")}</section>'
+        return sec(t, vacio("Calendario del Nasdaq no disponible ahora mismo.", "n"))
     if not P["filas"]:
-        return f'<section>{t}{vacio("Ninguna de las grandes reporta en los próximos 7 días.")}</section>'
+        return sec(t, vacio("Ninguna de las grandes reporta en los próximos 7 días."))
 
     def fila(x):
-        top = ' <span class="chip n">★ top 10</span>' if x["extra"] else ""
-        return (f'<tr><td class="hora">{esc(x["hora"])}</td><td><b>{esc(x["sym"])}</b></td>'
-                f'<td>{esc(x["nombre"])}{top}</td><td class="n">{cap_txt(x["cap"])}</td></tr>')
-    cuerpo = _tabla_por_dias(P["filas"], '<th>Hora</th><th>Ticker</th><th>Empresa</th><th class="n">Capitalización</th>', fila, 4)
-    notas = "BO: antes de abrir · AC: tras el cierre · n/d: hora no confirmada."
+        top = " " + chip("★") if x["extra"] else ""
+        return (f'<div class="pe"><span class="hr">{esc(x["hora"])}</span><b>{esc(x["sym"])}</b>'
+                f'<span class="nm">{esc(x["nombre"])}{top}</span><span class="cp">{cap_txt(x["cap"])}</span></div>')
+    nota = "BO: antes de abrir · AC: tras el cierre · n/d: hora no confirmada. ★ = entra por capitalización."
     if P["falta"]:
-        notas += " Sin earnings en la ventana: " + ", ".join(P["falta"]) + "."
-    return f'<section>{t}{cuerpo}<p class="nota">{esc(notas)}</p></section>'
+        nota += " Sin earnings en la ventana: " + ", ".join(P["falta"]) + "."
+    return sec(t, _por_dias(P["filas"], fila), nota)
 
 
 def h_splits(D):
     S = D["splits"]
-    t = f'<h2>Próximos splits — {S["dias"]} días</h2>'
+    t = f'Próximos splits · {S["dias"]} días · mega caps y tus tickers'
     if not S["ok"]:
-        return f'<section>{t}{vacio("Calendario de splits del Nasdaq no disponible ahora mismo.", "rojo")}</section>'
-    if not S["filas"] and not S["etf"]:
-        return f'<section>{t}{vacio("Sin splits anunciados en los próximos " + str(S["dias"]) + " días.")}</section>'
+        return sec(t, vacio("Calendario de splits del Nasdaq no disponible ahora mismo.", "n"))
     hoy = D["hoy"]
-    filas = []
-    for x in S["filas"]:
-        cls = {"INVERSO": "neg", "DIRECTO": "pos"}.get(x["tipo"], "n")
-        suyo = ' <span class="chip c">★ tuyo</span>' if x["suyo"] else ""
-        cuando = "HOY" if x["fecha"] == hoy else dia_corto(x["fecha"])
-        filas.append(f'<tr class="{"hoy" if x["fecha"] == hoy else ""}"><td class="hora">{esc(cuando)}</td><td><b>{esc(x["sym"])}</b></td>'
-                     f'<td><span class="chip {cls}">{esc(x["tipo"].lower())}</span></td><td>{esc(x["ratio"])}</td>'
-                     f'<td>{esc(x["nombre"])}{suyo}</td></tr>')
-    tabla = (f'<div class="tabla"><table><thead><tr><th>Fecha</th><th>Ticker</th><th>Tipo</th><th>Ratio</th><th>Empresa</th></tr></thead>'
-             f'<tbody>{"".join(filas)}</tbody></table></div>') if filas else ""
-    extra = ""
-    if S["mas"]:
-        extra += vacio(f'… y {S["mas"]} más (se muestran primero los tuyos, luego por fecha).')
-    e = S["etf"]
-    if e:
-        a, b = e["fechas"]
-        cuando = dia_corto(a) if a == b else dia_corto(a) + " – " + dia_corto(b)
-        extra += (f'<p class="nota">+ {e["n"]} ETF apalancados (Leverage Shares/Themes) con split {esc(e["tipos"])} el {esc(cuando)}: '
-                  f'{esc(", ".join(e["tickers"]))}{"…" if e["mas"] else ""}</p>')
-    extra += '<p class="nota">Ratio A : B = A acciones nuevas por B antiguas (1 : 10 = inverso, 3 : 1 = directo). Fuente: Nasdaq.</p>'
-    return f"<section>{t}{tabla}{extra}</section>"
+    if not S["filas"]:
+        cuerpo = vacio("Sin splits de mega caps ni de tus tickers en los próximos " + str(S["dias"]) + " días.")
+    else:
+        def fila(x):
+            suyo = " " + chip("★ tuyo", "a") if x["suyo"] else ""
+            tipo = chip(f'{x["tipo"].lower()} {x["ratio"]}', {"INVERSO": "n", "DIRECTO": "p"}.get(x["tipo"], ""))
+            return (f'<div class="sp {"hy" if x["fecha"] == hoy else ""}"><span class="hr">{"HOY" if x["fecha"] == hoy else esc(dia(x["fecha"]))}</span>'
+                    f'<b>{esc(x["sym"])}</b><span class="nm">{esc(x["nombre"])}{suyo}</span>{tipo}</div>')
+        cuerpo = lista([fila(x) for x in S["filas"]])
+    nota = (f'{S["ocultos"]} splits de empresas pequeñas ocultos. ' if S["ocultos"] else "") + \
+           "Ratio A : B = A acciones nuevas por B antiguas (1 : 10 = inverso). Fuente: Nasdaq."
+    return sec(t, cuerpo, nota)
 
 
-CSS = """
-:root { color-scheme: light dark;
-  --bg:#f3f5f8; --card:#ffffff; --bd:#d8dee6; --fg:#1b2430; --mut:#5f6b7a;
-  --pos:#12803c; --neg:#c62828; --warn:#a15c00; --neu:#6b7280; --acc:#0b66c3;
-  --pos-bg:#e3f6ea; --neg-bg:#fde7e7; --warn-bg:#fff2d6; --neu-bg:#eceff3; --acc-bg:#e3effc; --term:#101418; }
-@media (prefers-color-scheme: dark) { :root {
-  --bg:#0d1117; --card:#161b22; --bd:#2d343d; --fg:#e6edf3; --mut:#8b949e;
-  --pos:#3fb950; --neg:#ff7b72; --warn:#e3b341; --neu:#9aa4af; --acc:#79c0ff;
-  --pos-bg:#12301d; --neg-bg:#3a1618; --warn-bg:#3a2c0d; --neu-bg:#21262d; --acc-bg:#10283f; --term:#0a0d12; } }
-* { box-sizing:border-box; }
-body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
-.wrap { max-width:1180px; margin:0 auto; padding:16px; }
-header.top { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:flex-end; justify-content:space-between; margin-bottom:8px; }
-h1 { font-size:22px; margin:0; letter-spacing:-.01em; }
-.fecha { color:var(--mut); font-size:14px; }
-.estado { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:13px; color:var(--mut); }
-section { margin:22px 0; }
-h2 { font-size:15px; margin:0 0 8px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); font-weight:700; }
-.nota { color:var(--mut); font-size:12.5px; margin:8px 0 0; }
-.grid { display:grid; gap:10px; }
-.g4 { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
-.cards { grid-template-columns:repeat(auto-fill,minmax(310px,1fr)); }
-.card { background:var(--card); border:1px solid var(--bd); border-radius:12px; padding:12px 14px; }
-.metric .lbl { font-size:12px; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
-.metric .big { font-size:28px; font-weight:750; line-height:1.15; margin:2px 0; font-variant-numeric:tabular-nums; }
-.metric .sub { font-size:12px; color:var(--mut); }
-.metric.pos { border-left:5px solid var(--pos); } .metric.neg { border-left:5px solid var(--neg); } .metric.neu,.metric.nd { border-left:5px solid var(--neu); }
-.metric.pos .big { color:var(--pos); } .metric.neg .big { color:var(--neg); }
-.chip { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap;
-        background:var(--neu-bg); color:var(--neu); }
-.chip.pos,.chip.verde { background:var(--pos-bg); color:var(--pos); } .chip.neg,.chip.rojo,.chip.r { background:var(--neg-bg); color:var(--neg); }
-.chip.y,.chip.amarillo,.chip.o,.chip.neu { background:var(--warn-bg); color:var(--warn); }
-.chip.b,.chip.c { background:var(--acc-bg); color:var(--acc); } .chip.m { background:#efe6fb; color:#7a3fc0; }
-@media (prefers-color-scheme: dark) { .chip.m { background:#2a1d40; color:#d2a8ff; } }
-.aviso { margin:8px 0 0; padding:8px 12px; border-radius:10px; font-size:13.5px; border:1px solid transparent; }
-.aviso.rojo { background:var(--neg-bg); color:var(--neg); } .aviso.amarillo { background:var(--warn-bg); color:var(--warn); }
-.noticias { list-style:none; margin:0; padding:0; display:grid; gap:8px; }
-.noticia { background:var(--card); border:1px solid var(--bd); border-radius:12px; padding:10px 14px; display:grid; grid-template-columns:150px 1fr; gap:10px; }
-.noticia .nt { display:flex; flex-direction:column; gap:4px; align-items:flex-start; }
-.hora { color:var(--mut); font-size:12.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.fuente { color:var(--mut); font-size:12.5px; }
-.etfs { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
-.etf { background:var(--card); border:1px solid var(--bd); border-radius:10px; padding:4px 12px; display:flex; gap:8px; align-items:baseline; }
-.etf .lbl { font-size:12px; color:var(--mut); font-weight:700; } .etf b { font-variant-numeric:tabular-nums; }
-.etf.pos b { color:var(--pos); } .etf.neg b { color:var(--neg); }
-.k { color:var(--mut); font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
-.emp header { display:flex; align-items:baseline; gap:8px; }
-.tk { font-size:20px; font-weight:800; } .nm { color:var(--mut); font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
-.noticia .tx { min-width:0; overflow-wrap:anywhere; }
-.meta2 { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:4px 0 10px; }
-.cap { margin-left:auto; color:var(--mut); font-size:12.5px; }
-.duo { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-.box { border-radius:10px; padding:8px 10px; border:1px solid var(--bd); background:var(--neu-bg); display:flex; flex-direction:column; gap:1px; min-width:0; }
-.box b { font-size:15.5px; font-variant-numeric:tabular-nums; } .box small { color:var(--mut); font-size:12px; }
-.box.pos { background:var(--pos-bg); border-color:var(--pos); } .box.pos b { color:var(--pos); }
-.box.neg { background:var(--neg-bg); border-color:var(--neg); } .box.neg b { color:var(--neg); }
-.box.neu { background:var(--warn-bg); border-color:var(--warn); }
-.rel { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:10px; }
-.tabla { background:var(--card); border:1px solid var(--bd); border-radius:12px; overflow-x:auto; }
-table { width:100%; border-collapse:collapse; font-size:14px; }
-th,td { padding:7px 12px; text-align:left; vertical-align:top; border-bottom:1px solid var(--bd); }
-thead th { color:var(--mut); font-size:12px; text-transform:uppercase; letter-spacing:.05em; background:var(--neu-bg); }
-tr.dia th { background:var(--acc-bg); color:var(--acc); font-size:12.5px; text-transform:none; letter-spacing:0; }
-td.n,th.n { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
-tr.rojo td { background:var(--neg-bg); } tr.amarillo td { background:var(--warn-bg); } tr.hoy td { background:var(--warn-bg); }
-tbody tr:last-child td { border-bottom:0; }
-.vacio { color:var(--mut); margin:6px 0; } .vacio.rojo { color:var(--neg); } .vacio.amarillo { color:var(--warn); }
-details { margin-top:22px; } summary { cursor:pointer; color:var(--mut); font-size:13px; }
-.term { background:var(--term); color:#e6edf3; border-radius:10px; padding:12px 14px; margin:8px 0 0; overflow-x:auto;
-        font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace; white-space:pre; }
-.term .k{color:#6e7681}.term .r{color:#ff7b72}.term .g{color:#3fb950}.term .y{color:#e3b341}.term .b{color:#79c0ff}.term .m{color:#d2a8ff}
-.term .c{color:#56d4dd}.term .w{color:#e6edf3}.term .gr{color:#8b949e}.term .B{font-weight:700}
-footer { color:var(--mut); font-size:12px; margin:22px 0 4px; }
-@media (max-width:640px) { .noticia { grid-template-columns:1fr; } .duo { grid-template-columns:1fr; } .metric .big { font-size:24px; } }
-"""
+CSS = (
+    ":root{color-scheme:light dark;--bg:#f3f5f8;--c:#fff;--b:#d8dee6;--f:#1b2430;--m:#5f6b7a;--p:#12803c;--n:#c62828;--w:#a15c00;--a:#0b66c3;"
+    "--pb:#e3f6ea;--nb:#fde7e7;--wb:#fff2d6;--ab:#e3effc;--gb:#eceff3;--mb:#efe6fb;--mc:#7a3fc0}"
+    "@media(prefers-color-scheme:dark){:root{--bg:#0d1117;--c:#161b22;--b:#2d343d;--f:#e6edf3;--m:#8b949e;--p:#3fb950;--n:#ff7b72;--w:#e3b341;"
+    "--a:#79c0ff;--pb:#12301d;--nb:#3a1618;--wb:#3a2c0d;--ab:#10283f;--gb:#21262d;--mb:#2a1d40;--mc:#d2a8ff}}"
+    "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--f);font:14px/1.35 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;"
+    "-webkit-text-size-adjust:100%}.w{max-width:960px;margin:0 auto;padding:10px}"
+    "header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:2px 10px}h1{font-size:17px;margin:0}"
+    ".s{color:var(--m);font-size:12px}section{margin:14px 0}h2{font-size:11.5px;margin:0 0 5px;text-transform:uppercase;letter-spacing:.05em;color:var(--m)}"
+    ".nt{color:var(--m);font-size:11px;margin:5px 0 0}.lb{color:var(--m);font-size:10.5px}"
+    ".cd,.ls{background:var(--c);border:1px solid var(--b);border-radius:10px}.cd{padding:7px 9px}.ls{overflow:hidden}"
+    ".g4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}"
+    ".mt{display:flex;flex-direction:column;gap:1px;border-left:4px solid var(--m);padding:6px 8px}.mt b{font-size:17px;font-variant-numeric:tabular-nums;white-space:nowrap}"
+    ".mt.p{border-color:var(--p)}.mt.p b{color:var(--p)}.mt.n{border-color:var(--n)}.mt.n b{color:var(--n)}"
+    ".av{margin-top:6px;padding:5px 9px;border-radius:8px;font-size:12.5px}.av.n{background:var(--nb);color:var(--n)}.av.w{background:var(--wb);color:var(--w)}"
+    ".ch{display:inline-block;padding:0 6px;border-radius:99px;font-size:10.5px;font-weight:600;font-style:normal;white-space:nowrap;background:var(--gb);color:var(--m)}"
+    ".ch.p{background:var(--pb);color:var(--p)}.ch.n{background:var(--nb);color:var(--n)}.ch.w{background:var(--wb);color:var(--w)}"
+    ".ch.a{background:var(--ab);color:var(--a)}.ch.m{background:var(--mb);color:var(--mc)}"
+    ".nw{padding:6px 9px;border-bottom:1px solid var(--b)}.nw:last-child,.ev:last-child,.pe:last-child,.sp:last-child{border-bottom:0}"
+    ".mm{font-size:11px;color:var(--m);margin-bottom:1px}.fu{color:var(--m);font-size:11px}a{color:inherit;text-decoration:none}a:hover{text-decoration:underline}"
+    ".etr{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:6px}"
+    ".et{background:var(--c);border:1px solid var(--b);border-radius:7px;padding:0 6px;font-size:11px;white-space:nowrap}.et.p b{color:var(--p)}.et.n b{color:var(--n)}"
+    ".gc{display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:6px}"
+    ".hd{display:flex;align-items:center;gap:5px;min-width:0}.tk{font-size:16px}.nm{color:var(--m);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}"
+    ".cp{margin-left:auto;color:var(--m);font-size:11px;white-space:nowrap}"
+    ".du{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:5px}"
+    ".bx{border:1px solid var(--b);border-radius:8px;padding:4px 7px;background:var(--gb);display:flex;flex-direction:column;min-width:0}"
+    ".bx b{font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
+    ".bx.p{background:var(--pb);border-color:var(--p)}.bx.p b{color:var(--p)}.bx.n{background:var(--nb);border-color:var(--n)}.bx.n b{color:var(--n)}.bx.w{background:var(--wb);border-color:var(--w)}"
+    ".rl{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}"
+    ".dy{background:var(--ab);color:var(--a);font-size:11.5px;font-weight:600;padding:2px 9px}"
+    ".ev,.pe,.sp{display:grid;gap:6px;align-items:baseline;padding:4px 9px;border-bottom:1px solid var(--b);font-size:12.5px}"
+    ".ev{grid-template-columns:52px 1fr auto}.ev.r{background:var(--nb)}.ev.y{background:var(--wb)}"
+    ".pe{grid-template-columns:28px 44px minmax(0,1fr) auto}.sp{grid-template-columns:50px 46px minmax(0,1fr) auto}.sp.hy{background:var(--wb)}"
+    ".hr{color:var(--m);font-size:11.5px;white-space:nowrap}.nu{color:var(--m);font-size:11.5px;text-align:right}.nu b{color:var(--f)}"
+    ".ev0{color:var(--m);margin:4px 0}.ev0.n{color:var(--n)}"
+    "footer{color:var(--m);font-size:11px;margin:14px 0 2px}"
+    "@media(max-width:360px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}}"
+)
 
-PLANTILLA = """<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Premarket Wall Street</title>
-<style>__CSS__</style>
-</head>
-<body>
-<div class="wrap">
-  <header class="top">
-    <div><h1>Wall Street hoy · Premarket</h1><div class="fecha">__FECHA__</div></div>
-    <div class="estado"><span class="chip c">franja __FRANJA__</span><span>Actualizado __ACTUALIZADO__</span><span id="hace" data-iso="__ISO__"></span></div>
-  </header>
-__CUERPO__
-  <details><summary>Ver versión texto (la misma salida que la terminal)</summary><pre class="term">__TEXTO__</pre></details>
-  <footer>Se actualiza 3 veces por día de mercado (8:00, 8:30 y 9:15 hora de Nueva York; la bolsa abre a las 9:30).
-  Fuentes: Yahoo Finance (futuros y precios, con retraso), Nasdaq (earnings y splits), Google News, Investing.com. No es una recomendación de inversión.</footer>
-</div>
-<script>
-  (function () {
-    var el = document.getElementById("hace"); if (!el) return;
-    var t = Date.parse(el.dataset.iso); if (isNaN(t)) return;
-    function pinta() {
-      var min = Math.max(0, Math.round((Date.now() - t) / 60000));
-      el.textContent = "· " + (min < 60 ? "hace " + min + " min" : "hace " + Math.floor(min / 60) + " h " + (min % 60) + " min");
-    }
-    pinta(); setInterval(pinta, 30000);
-  })();
-</script>
-</body>
-</html>
-"""
+PLANTILLA = (
+    '<!doctype html><html lang="es"><head><meta charset="utf-8">'
+    '<meta name="viewport" content="width=device-width,initial-scale=1"><title>Premarket Wall Street</title>'
+    "<style>__CSS__</style></head><body><div class=\"w\">"
+    '<header><div><h1>Wall Street hoy · Premarket</h1><div class="s">__FECHA__</div></div>'
+    '<div class="s">__CHIP__ Actualizado <b>__ACTUALIZADO__</b> <span id="hc" data-iso="__ISO__"></span></div></header>'
+    "__CUERPO__"
+    "<footer>Se actualiza 3 veces por día de mercado (8:00, 8:30 y 9:15 hora de Nueva York; la bolsa abre a las 9:30). "
+    "Fuentes: Yahoo Finance (con retraso), Nasdaq, Google News, Investing.com. No es una recomendación de inversión.</footer>"
+    "</div><script>(function(){var e=document.getElementById('hc');if(!e)return;var t=Date.parse(e.dataset.iso);if(isNaN(t))return;"
+    "function f(){var m=Math.max(0,Math.round((Date.now()-t)/6e4));e.textContent='· '+(m<60?'hace '+m+' min':'hace '+Math.floor(m/60)+' h '+m%60+' min')}"
+    "f();setInterval(f,3e4)})()</script></body></html>"
+)
 
 
 def main():
@@ -438,27 +335,23 @@ def main():
 
     try:
         D = gi.reunir_premarket()
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            gi.imprimir_premarket(D)
-        cuerpo = "\n".join([h_futuros(D), h_noticias(D), h_earnings(D), h_agenda(D), h_proximos(D), h_splits(D)])
+        cuerpo = "".join([h_futuros(D), h_noticias(D), h_earnings(D), h_agenda(D), h_proximos(D), h_splits(D)])
     except Exception:
         sys.stderr.write(traceback.format_exc())
         return salir(False, "ERROR generando el resumen; la pagina anterior se mantiene", codigo=1)
 
     utc = ahora.astimezone(datetime.timezone.utc)
     fecha = f"{DIAS_LARGO[ahora.weekday()]} {ahora.day} de {MESES_LARGO[ahora.month - 1]} de {ahora.year}"
-    actualizado = f"{ahora:%H:%M} ET ({utc:%H:%M} UTC)"
-    pagina = (PLANTILLA.replace("__CSS__", CSS).replace("__FECHA__", fecha).replace("__FRANJA__", franja)
-              .replace("__ACTUALIZADO__", actualizado).replace("__ISO__", utc.isoformat())
-              .replace("__CUERPO__", cuerpo).replace("__TEXTO__", ansi_a_html(buf.getvalue()).strip("\n")))
+    actualizado = f"{ahora:%H:%M} ET"
+    pagina = (PLANTILLA.replace("__CSS__", CSS).replace("__FECHA__", fecha).replace("__CHIP__", chip("franja " + franja, "a"))
+              .replace("__ACTUALIZADO__", actualizado).replace("__ISO__", utc.isoformat()).replace("__CUERPO__", cuerpo))
 
     os.makedirs(a.salida, exist_ok=True)
     with open(os.path.join(a.salida, "index.html"), "w", encoding="utf-8", newline="\n") as f:
         f.write(pagina)
     with open(estado_ruta, "w", encoding="utf-8", newline="\n") as f:
         json.dump({"fecha": ahora.date().isoformat(), "franja": franja, "utc": utc.isoformat()}, f)
-    return salir(True, f"Pagina generada en {a.salida} ({fecha}, {actualizado}, franja {franja})")
+    return salir(True, f"Pagina generada en {a.salida} ({fecha}, {actualizado}, franja {franja}, {len(pagina) // 1024} KB)")
 
 
 def salir(generado, mensaje, codigo=0):

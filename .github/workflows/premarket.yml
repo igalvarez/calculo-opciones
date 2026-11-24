@@ -68,6 +68,10 @@ jobs:
       - name: Generar pagina premarket
         id: gen
         if: steps.mh.outputs.run == 'true'
+        env:
+          # Contacto que exige la SEC para consultar sus 8-K. Esta en un secreto del repo (Settings > Secrets > Actions);
+          # nunca se escribe en el codigo. Si no existe, la SEC se omite y el resto funciona.
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
         run: python publicar_premarket.py ${{ github.event_name == 'workflow_dispatch' && inputs.forzar && '--forzar' || '' }}
 
       - name: Guardar en el repo
