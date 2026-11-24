@@ -23,7 +23,7 @@ Uso:
   python opciones_baseline.py collect --tickers tickers.txt --loop --every 15
   python opciones_baseline.py report  --tickers tickers.txt
   python opciones_baseline.py check   --tickers tickers.txt
-  python opciones_baseline.py html    --tickers tickers.txt --out docs/index.html
+  python opciones_baseline.py html    --tickers tickers.txt --out docs/estado_opciones.html
   python opciones_baseline.py demo                  (prueba con datos simulados, sin internet)
 
 Formato de tickers.txt (uno por linea; el rango de prima por ticker es opcional):
@@ -761,7 +761,7 @@ def main():
 
     w = sub.add_parser("html", help="genera una pagina HTML con el estado de la ultima foto")
     common(w)
-    w.add_argument("--out", default="docs/index.html")
+    w.add_argument("--out", default="docs/estado_opciones.html")
     w.add_argument("--factor", type=num, default=2.0)
     w.add_argument("--min-n", type=int, default=5)
 

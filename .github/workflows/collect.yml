@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       prueba:
-        description: "Modo prueba: ignora el horario, NO guarda en el repo ni publica; solo muestra el resultado en el log"
+        description: "Modo prueba: ignora el horario, NO guarda en el repo; solo muestra el resultado en el log"
         type: boolean
         default: true
 
@@ -27,8 +27,6 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    outputs:
-      publish: ${{ steps.pub.outputs.publish }}
     steps:
       - name: Comprobar horario de mercado (hora de Nueva York)
         id: mh
@@ -71,49 +69,32 @@ jobs:
           mkdir -p data
           python opciones_baseline.py collect --tickers tickers.txt --csv data/options_snapshots.csv
 
-      - name: Generar pagina HTML
+      - name: Generar pagina HTML de estado
         if: ${{ steps.mh.outputs.open == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.prueba) }}
-        run: python opciones_baseline.py html --tickers tickers.txt --csv data/options_snapshots.csv --out docs/index.html
+        run: python opciones_baseline.py html --tickers tickers.txt --csv data/options_snapshots.csv --out docs/estado_opciones.html
 
+      # Guardar en el repo. Los commits hechos con el GITHUB_TOKEN NO hacen que GitHub Pages se republique
+      # (si Pages publica desde una rama). Por eso, si existe el secreto PAGES_PAT, se hace el push con ese
+      # token personal. Si no existe o ha caducado, se usa el GITHUB_TOKEN: los datos se guardan igual y
+      # solo la pagina no se refresca sola.
       - name: Guardar en el repo
         if: ${{ steps.mh.outputs.open == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.prueba) }}
+        env:
+          PAGES_PAT: ${{ secrets.PAGES_PAT }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/options_snapshots.csv || true
-          git add docs/index.html || true
+          git add docs/estado_opciones.html || true
           if git diff --cached --quiet; then
             echo "Sin cambios que guardar"
           else
             git commit -m "foto $(date -u +%Y-%m-%dT%H:%MZ)"
             git pull --rebase
-            git push
+            if [ -n "$PAGES_PAT" ]; then
+              git push "https://x-access-token:${PAGES_PAT}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}" \
+                || { echo "AVISO: el push con PAGES_PAT fallo (caducado o sin permisos); uso GITHUB_TOKEN"; git push; }
+            else
+              git push
+            fi
           fi
-
-      - name: Preparar pagina para GitHub Pages
-        if: ${{ steps.mh.outputs.open == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.prueba) }}
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs
-
-      - name: Marcar publicar
-        id: pub
-        if: ${{ steps.mh.outputs.open == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.prueba) }}
-        run: echo "publish=true" >> "$GITHUB_OUTPUT"
-
-  # Publica la pagina. Si GitHub Pages no esta activado (o el repo es privado en plan gratuito),
-  # este trabajo falla pero NO afecta a la recogida de datos (continue-on-error).
-  deploy:
-    needs: collect
-    if: needs.collect.outputs.publish == 'true'
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4

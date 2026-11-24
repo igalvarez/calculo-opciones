@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calculadora Opciones y Acciones</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1117; color: #e6edf3;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    display: flex; justify-content: center;
+  }
+  /* Todo cabe en una pantalla: la página ocupa el alto de la ventana y se reparte en 3 filas */
+  .card {
+    width: 100%; max-width: 1480px; height: 100vh;
+    display: grid; grid-template-rows: auto auto minmax(0,1fr) auto;
+    gap: clamp(6px, 1.2vh, 14px);
+    padding: clamp(10px, 1.8vh, 22px) clamp(14px, 2.2vw, 36px);
+    overflow: auto;
+  }
+  .header { display: flex; align-items: center; justify-content: space-between; }
+  h1 { font-size: clamp(15px, 2vh, 19px); font-weight: 600; }
+  .meta { font-size: 12px; color: #6e7681; text-align: right; line-height: 1.4; }
+
+  .panel { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: clamp(10px, 1.6vh, 18px) clamp(12px, 1.4vw, 22px); min-height: 0; }
+  .panel-title { font-size: 13px; font-weight: 600; color: #8b949e; margin-bottom: clamp(6px, 1vh, 10px); }
+
+  .opciones { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(10px, 1.4vw, 22px); min-height: 0; }
+  .col { display: flex; flex-direction: column; gap: clamp(6px, 1.1vh, 12px); min-height: 0; }
+
+  label { font-size: 13px; color: #8b949e; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+
+  input, select {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3;
+    font-size: clamp(15px, 2.1vh, 18px); font-weight: 600;
+    padding: clamp(6px, 1vh, 10px) 12px; width: 100%; outline: none; transition: border-color 0.15s;
+  }
+  select { cursor: pointer; }
+  select option { background: #161b22; color: #e6edf3; }
+  select:disabled { opacity: 0.5; cursor: wait; }
+  input:focus, select:focus { border-color: #58a6ff; }
+  input:focus-visible, select:focus-visible, .plan-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+
+  /* Los dos campos clave, lo más grandes posible */
+  #ask, #sp-price {
+    font-size: clamp(30px, 6vh, 58px); font-weight: 700; padding: clamp(6px, 1.2vh, 14px) 16px;
+    border-width: 2px; letter-spacing: 0.5px;
+  }
+  .big-label { font-size: 15px; color: #c9d1d9; font-weight: 600; }
+
+  input.ask-ok   { border-color: #238636; }
+  input.ask-mid  { border-color: #d29922; background: #1a1408; }
+  input.ask-warn { border-color: #da3633; background: #1a0a0a; }
+  .ask-hint { font-size: 13px; min-height: 17px; }
+  .ask-hint.ok { color: #3fb950; } .ask-hint.mid { color: #d29922; } .ask-hint.warn { color: #f85149; }
+
+  .ticker-row { display: grid; grid-template-columns: minmax(150px, 1fr) 2fr; gap: 10px; align-items: start; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .range-display {
+    display: flex; align-items: center; gap: 6px; background: #0d1117; border: 1px solid #30363d;
+    border-radius: 6px; padding: 4px 10px; font-size: 13px; color: #8b949e;
+  }
+  .range-display .val { color: #f0a030; font-weight: 700; font-size: 15px; }
+  .range-display.alt .val { color: #8b949e; font-size: 13px; }
+  .range-display .fecha { font-size: 11px; color: #6e7681; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .plan-toggle { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .plan-btn {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #8b949e; cursor: pointer;
+    font-size: clamp(14px, 2vh, 16px); font-weight: 600; padding: clamp(6px, 1vh, 10px); text-align: center; transition: all 0.15s;
+  }
+  .plan-btn.active      { background: #1f3a5f; border-color: #58a6ff; color: #58a6ff; }
+  .plan-btn.p100.active { background: #2d1f5f; border-color: #a371f7; color: #a371f7; }
+
+  /* Ajustes secundarios: pequeños, para no robar espacio */
+  .mini { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; align-items: end; }
+  .mini.one { grid-template-columns: minmax(150px, 220px); }
+  .mini.one input { font-size: 16px; padding: 6px 10px; }
+  .mini label { font-size: 11px; color: #6e7681; }
+  .mini input { font-size: 14px; padding: 5px 8px; font-weight: 600; }
+  input[type=checkbox] { width: auto; padding: 0; accent-color: #58a6ff; }
+  .check-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6e7681; cursor: pointer; }
+
+  .result-box { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: clamp(6px, 1.2vh, 14px) 10px; text-align: center; transition: border-color 0.3s; }
+  .result-label { font-size: 13px; color: #8b949e; margin-bottom: 4px; }
+  .result-value { font-size: clamp(20px, 3.2vh, 30px); font-weight: 700; color: #e6edf3; }
+  .result-value.hi { color: #f0a030; } .result-value.pu { color: #a371f7; }
+  .result-box.green { border-color: #238636; } .result-box.red { border-color: #da3633; }
+  .result-sub { font-size: 12px; color: #6e7681; margin-top: 4px; }
+  #limit-box { border-width: 2px; border-color: #f0a030; }
+  #res-limit, #sp-limit { font-size: clamp(38px, 8vh, 80px); line-height: 1.05; }
+  .results2 { display: grid; grid-template-columns: 1fr; gap: 10px; }
+
+  .saldo-row, .stop-row {
+    display: flex; align-items: center; justify-content: space-between; border-radius: 8px;
+    padding: clamp(6px, 1vh, 12px) 16px; border: 1px solid #30363d; background: #0d1117; transition: all 0.3s;
+  }
+  .saldo-row.ok   { background: #0d2818; border-color: #238636; }
+  .saldo-row.warn { background: #2d1212; border-color: #da3633; }
+  .saldo-status { font-size: 15px; font-weight: 600; color: #e6edf3; }
+  .saldo-row.ok .saldo-status { color: #3fb950; } .saldo-row.warn .saldo-status { color: #f85149; }
+  .saldo-detail { font-size: 12px; color: #8b949e; margin-top: 2px; }
+  .saldo-right  { font-size: clamp(18px, 2.8vh, 26px); font-weight: 700; color: #e6edf3; white-space: nowrap; margin-left: 8px; }
+
+  /* Acciones */
+  .acciones-row { display: grid; grid-template-columns: 1.6fr 0.8fr 0.7fr 1.6fr 1.3fr; gap: clamp(8px, 1vw, 16px); align-items: stretch; }
+  .acciones-row .field input:not(#sp-price) { font-size: clamp(18px, 2.8vh, 24px); }
+  .warn-txt { font-size: 12px; color: #f85149; display: none; }
+  .gan-box { background: #0d2818; border: 1px solid #238636; border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; justify-content: center; }
+  .gan-box .lab { font-size: 13px; color: #3fb950; font-weight: 600; }
+  .gan-box .val { font-size: clamp(22px, 3.6vh, 34px); font-weight: 700; }
+  .gan-box .det { font-size: 12px; color: #8b949e; }
+
+  .error-banner { background: #2d1212; border: 1px solid #da3633; border-radius: 6px; color: #f85149; font-size: 13px; padding: 10px 14px; display: none; line-height: 1.6; }
+  .error-banner code { background: #0d1117; padding: 2px 6px; border-radius: 3px; color: #e6edf3; }
+
+  @media (max-width: 900px) {
+    .card { height: auto; min-height: 100vh; }
+    .opciones, .ticker-row { grid-template-columns: 1fr; }
+    .acciones-row { grid-template-columns: 1fr 1fr; }
+    .mini.one { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <div class="header">
+    <h1>📊 Calculadora de Opciones y Acciones</h1>
+    <div class="meta"><div>Versión 2.6</div><div id="meta-src">Cargando rp.xls…</div></div>
+  </div>
+
+  <div class="error-banner" id="error-banner"></div>
+
+  <!-- ── OPCIONES ── -->
+  <div class="opciones">
+    <div class="panel col">
+      <div class="ticker-row">
+        <select id="ticker-select" onchange="onTickerChange()" disabled aria-label="Ticker">
+          <option value="">— Cargando… —</option>
+        </select>
+        <div class="chips">
+          <div class="range-display" id="range-display" style="display:none;">
+            <span>Rango óptimo</span><span class="val" id="range-opt">—</span><span class="fecha" id="range-fecha"></span>
+          </div>
+          <div class="range-display alt" id="range-display-mm" style="display:none;">
+            <span>Mín / Máx</span><span class="val" id="range-mm">—</span>
+          </div>
+          <div class="range-display" id="range-display-contratos" style="display:none;">
+            <span>Máx contratos</span><span class="val" id="range-contratos-val">—</span><span class="fecha" id="range-contratos-detalle"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="big-label" for="ask">ASK (prima)</label>
+        <input type="number" id="ask" placeholder="1.24" step="0.01" inputmode="decimal">
+        <div class="ask-hint" id="ask-hint"></div>
+      </div>
+
+      <div class="grid2">
+        <div class="field"><label for="monto">Monto inicial ($)</label><input type="number" id="monto" placeholder="800" value="800"></div>
+        <div class="field"><label for="contratos">Contratos</label><input type="number" id="contratos" placeholder="1" min="1" value="1"></div>
+      </div>
+
+      <div class="plan-toggle" role="group" aria-label="Plan">
+        <div class="plan-btn active" id="btn10"  tabindex="0" onclick="setPlan(10)">Plan 10%</div>
+        <div class="plan-btn"        id="btn35"  tabindex="0" onclick="setPlan(35)">Plan 35%</div>
+        <div class="plan-btn p100"   id="btn100" tabindex="0" onclick="setPlan(100)">Plan 100%</div>
+      </div>
+
+      <div class="mini one">
+        <div class="field"><label for="plus">Plus por contrato ($)</label><input type="number" id="plus" value="2.00" step="0.10" min="0"></div>
+      </div>
+    </div>
+
+    <div class="panel col">
+      <div class="result-box" id="limit-box">
+        <div class="result-label">LIMIT a poner en el bróker</div>
+        <div class="result-value hi" id="res-limit">—</div>
+        <div class="result-sub" id="res-limit-sub"></div>
+      </div>
+      <div class="results2">
+        <div class="result-box" id="box-coste">
+          <div class="result-label">Coste</div>
+          <div class="result-value" id="res-coste">—</div>
+        </div>
+      </div>
+      <div class="saldo-row ok" id="saldo-box">
+        <div><div class="saldo-status" id="saldo-status">Selecciona un ticker</div><div class="saldo-detail" id="saldo-detail">—</div></div>
+        <div class="saldo-right" id="res-saldo">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ACCIONES ── -->
+  <div class="panel">
+    <div class="panel-title">📈 Acciones (compra) — precio LIMIT de venta <span id="sp-max-label" style="color:#6e7681; font-weight:400;"></span></div>
+    <div class="acciones-row">
+      <div class="field">
+        <label class="big-label" for="sp-price">Precio de compra ($)</label>
+        <input type="number" id="sp-price" placeholder="300.00" step="0.01" inputmode="decimal" oninput="calcStock()">
+        <div class="warn-txt" id="sp-price-warn">⚠️ Supera el 50% del monto disponible</div>
+      </div>
+      <div class="field">
+        <label for="sp-pct">Objetivo (%)</label>
+        <input type="number" id="sp-pct" placeholder="1.25" step="0.05" oninput="calcStock()">
+      </div>
+      <div class="field">
+        <label for="sp-qty">Cantidad</label>
+        <input type="number" id="sp-qty" placeholder="3" step="1" min="1" oninput="calcStock()">
+      </div>
+      <div class="result-box" id="sp-result-box" style="border-width:2px;">
+        <div class="result-label">LIMIT de venta</div>
+        <div class="result-value hi" id="sp-limit">—</div>
+        <div class="result-sub" id="sp-detail">—</div>
+      </div>
+      <div class="gan-box" id="sp-ganancia-row">
+        <div class="lab">Ganancia neta si se ejecuta</div>
+        <div class="val" id="sp-ganancia-val">—</div>
+        <div class="det" id="sp-ganancia-detail">—</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   CONFIGURACIÓN
+   ═══════════════════════════════════════════════════════════ */
+const ARCHIVO_DATOS = 'rp.xls';   // debe estar en la misma carpeta que este HTML
+
+let TICKERS  = [];
+let plan     = 10;
+let optMin   = 0,  optMax   = 9999;   // rango óptimo
+let hardMin  = 0,  hardMax  = 9999;   // mín/máx absoluto
+
+const sel = document.getElementById('ticker-select');
+
+/* ═══════════════════════════════════════════════════════════
+   CARGA DEL EXCEL
+   ═══════════════════════════════════════════════════════════ */
+
+/** Extrae los dos números de textos tipo "$140 - $230", "$40 -$60", "$50 - 70" */
+function extraerRango(txt) {
+  if (!txt) return null;
+  const nums = String(txt).match(/\d+(?:[.,]\d+)?/g);
+  if (!nums || nums.length < 2) return null;
+  const a = parseFloat(nums[0].replace(',', '.'));
+  const b = parseFloat(nums[1].replace(',', '.'));
+  if (isNaN(a) || isNaN(b)) return null;
+  return { min: Math.min(a, b), max: Math.max(a, b) };
+}
+
+function fmtRango(r) {
+  if (!r) return '—';
+  return '$' + r.min + ' - $' + r.max;
+}
+
+/** Convierte una matriz de filas (array de arrays) en el array TICKERS */
+function filasATickers(filas) {
+  const out = [];
+  for (const fila of filas) {
+    if (!fila || fila.length < 3) continue;
+    const ticker = String(fila[0] || '').trim().toUpperCase();
+    // descartar cabeceras y filas vacías
+    if (!ticker || ticker === 'TICKER' || ticker.length > 6) continue;
+    if (!/^[A-Z.\-]+$/.test(ticker)) continue;
+
+    const opt = extraerRango(fila[1]);
+    if (!opt) continue;
+
+    const mm     = extraerRango(fila[2]) || opt;
+    const fecha  = String(fila[3] || '').trim();
+    const nombre = String(fila[fila.length - 1] || '').trim() || ticker;
+
+    out.push({
+      t: ticker,
+      name: nombre.length > 40 ? nombre.slice(0, 40) + '…' : nombre,
+      optTxt: fmtRango(opt),
+      mmTxt:  fmtRango(mm),
+      optMin: opt.min,  optMax: opt.max,
+      mmMin:  mm.min,   mmMax:  mm.max,
+      fecha: fecha
+    });
+  }
+  return out;
+}
+
+/** Parsea un .xls que en realidad es HTML (export de Google Sheets) */
+function parsearComoHTML(texto) {
+  const doc = new DOMParser().parseFromString(texto, 'text/html');
+  const filas = [];
+  doc.querySelectorAll('tr').forEach(tr => {
+    const celdas = [];
+    tr.querySelectorAll('td, th').forEach(td => celdas.push(td.textContent.trim()));
+    if (celdas.some(c => c)) filas.push(celdas);
+  });
+  return filas;
+}
+
+/** Parsea un .xls / .xlsx binario real con SheetJS */
+function parsearComoExcel(buffer) {
+  const wb = XLSX.read(buffer, { type: 'array' });
+  const hoja = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(hoja, { header: 1, blankrows: false, defval: '' });
+}
+
+function mostrarError(msg) {
+  const b = document.getElementById('error-banner');
+  b.innerHTML = msg;
+  b.style.display = 'block';
+  document.getElementById('meta-src').textContent = 'Error al cargar datos';
+  sel.innerHTML = '<option value="">— Sin datos —</option>';
+  sel.disabled = true;
+}
+
+async function cargarDatos() {
+  try {
+    const resp = await fetch(ARCHIVO_DATOS + '?v=' + Date.now());
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+    const buffer = await resp.arrayBuffer();
+
+    // Detectar si el contenido es HTML disfrazado de .xls
+    const cabecera = new TextDecoder('utf-8')
+                       .decode(buffer.slice(0, 200))
+                       .toLowerCase();
+    const esHTML = cabecera.includes('<html') ||
+                   cabecera.includes('<!doctype') ||
+                   cabecera.includes('<table');
+
+    let filas;
+    if (esHTML) {
+      filas = parsearComoHTML(new TextDecoder('utf-8').decode(buffer));
+    } else {
+      filas = parsearComoExcel(buffer);
+    }
+
+    TICKERS = filasATickers(filas);
+
+    if (!TICKERS.length) {
+      mostrarError('El archivo <code>' + ARCHIVO_DATOS + '</code> se cargó pero no se encontró ningún ticker válido. ' +
+                   'Comprueba que la columna A tenga el ticker y la columna B el rango óptimo.');
+      return;
+    }
+
+    poblarSelect();
+    document.getElementById('meta-src').textContent =
+      TICKERS.length + ' tickers · ' + ARCHIVO_DATOS;
+
+  } catch (err) {
+    mostrarError(
+      'No se pudo leer <code>' + ARCHIVO_DATOS + '</code>.<br>' +
+      'Asegúrate de que está en la misma carpeta que este HTML y de que abres la página ' +
+      'por HTTP (GitHub Pages o servidor local), no con doble clic.<br>' +
+      '<span style="color:#8b949e">Detalle: ' + err.message + '</span>'
+    );
+  }
+}
+
+function poblarSelect() {
+  sel.innerHTML = '<option value="">— Selecciona un ticker —</option>';
+  TICKERS.forEach(tk => {
+    const opt = document.createElement('option');
+    opt.value = tk.t;
+    opt.textContent = tk.t + ' — ' + tk.name + '  (' + tk.optTxt + ')';
+    sel.appendChild(opt);
+  });
+  sel.disabled = false;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LÓGICA DE LA CALCULADORA
+   ═══════════════════════════════════════════════════════════ */
+
+function calcularMaxContratos() {
+  const monto = parseFloat(document.getElementById('monto').value) || 0;
+  const dContratos = document.getElementById('range-display-contratos');
+
+  if (!sel.value || optMax >= 9999 || monto <= 0) {
+    dContratos.style.display = 'none';
+    return;
+  }
+
+  const disponible = monto * 0.5;
+  const costePorContrato = optMax * 100;          // optMax ya está en $ de prima
+  const maxContratos = Math.floor(disponible / costePorContrato);
+
+  document.getElementById('range-contratos-val').textContent = maxContratos > 0 ? maxContratos : '0';
+  document.getElementById('range-contratos-detalle').textContent =
+    '$' + disponible.toFixed(0) + ' ÷ $' + costePorContrato.toFixed(0);
+
+  dContratos.style.display = 'flex';
+
+  // Solo baja los contratos si superan el máximo; nunca los sube por su cuenta
+  const cInput = document.getElementById('contratos');
+  const actual = parseInt(cInput.value) || 1;
+  if (maxContratos > 0 && actual > maxContratos) cInput.value = maxContratos;
+}
+
+function onTickerChange() {
+  const val = sel.value;
+  const dOpt = document.getElementById('range-display');
+  const dMM  = document.getElementById('range-display-mm');
+
+  if (!val) {
+    dOpt.style.display = 'none';
+    dMM.style.display  = 'none';
+    document.getElementById('range-display-contratos').style.display = 'none';
+    optMin = 0; optMax = 9999; hardMin = 0; hardMax = 9999;
+    calcular(); return;
+  }
+
+  const tk = TICKERS.find(t => t.t === val);
+  if (!tk) return;
+
+  optMin  = tk.optMin / 100;  optMax  = tk.optMax / 100;
+  hardMin = tk.mmMin  / 100;  hardMax = tk.mmMax  / 100;
+
+  document.getElementById('range-opt').textContent   = tk.optTxt;
+  document.getElementById('range-mm').textContent    = tk.mmTxt;
+  document.getElementById('range-fecha').textContent = tk.fecha ? 'act. ' + tk.fecha : '';
+  dOpt.style.display = 'flex';
+  dMM.style.display  = 'flex';
+  calcularMaxContratos();
+  calcular();
+}
+
+function setPlan(p) {
+  plan = p;
+  document.getElementById('btn10').classList.toggle('active', p === 10);
+  document.getElementById('btn35').classList.toggle('active', p === 35);
+  document.getElementById('btn100').classList.toggle('active', p === 100);
+  document.getElementById('res-limit').className = 'result-value ' + (p === 100 ? 'pu' : 'hi');
+  calcular();
+}
+
+function fmt(n) { return '$' + n.toFixed(2); }
+
+/* Redondea HACIA ARRIBA al salto válido: $0.01 bajo $3, $0.05 desde $3 (programa Penny) */
+function ceilTick(price) {
+  const pennyAll = ['SPY','QQQ','IWM'].includes((sel.value || '').toUpperCase());   // $0.01 a cualquier precio
+  const tick = (pennyAll || price < 3) ? 0.01 : 0.05;
+  const cents = Math.round(tick * 100);
+  const c = Math.ceil(Math.round(price * 10000) / 100 - 1e-9);   // a centavos, hacia arriba
+  return Math.ceil(c / cents - 1e-9) * cents / 100;
+}
+
+function calcular() {
+  const monto     = parseFloat(document.getElementById('monto').value)     || 0;
+  const contratos = parseFloat(document.getElementById('contratos').value) || 0;
+  const ask       = parseFloat(document.getElementById('ask').value);
+  const plus      = parseFloat(document.getElementById('plus').value)      || 0;
+
+  const askInput = document.getElementById('ask');
+  const askHint  = document.getElementById('ask-hint');
+
+  if (!isNaN(ask) && ask > 0) {
+    if (ask >= optMin && ask <= optMax) {
+      askInput.className  = 'ask-ok';
+      askHint.className   = 'ask-hint ok';
+      askHint.textContent = '✓ en rango óptimo';
+    } else if (ask >= hardMin && ask <= hardMax) {
+      askInput.className  = 'ask-mid';
+      askHint.className   = 'ask-hint mid';
+      askHint.textContent = '⚠ fuera del óptimo, dentro de mín/máx';
+    } else {
+      askInput.className  = 'ask-warn';
+      askHint.className   = 'ask-hint warn';
+      askHint.textContent = ask < hardMin ? '✗ muy bajo' : '✗ muy alto';
+    }
+  } else {
+    askInput.className  = '';
+    askHint.className   = 'ask-hint';
+    askHint.textContent = '';
+  }
+
+  if (isNaN(ask) || ask <= 0) {
+    ['res-limit','res-coste','res-saldo'].forEach(id =>
+      document.getElementById(id).textContent = '—');
+    document.getElementById('saldo-status').textContent = 'Introduce el ASK';
+    document.getElementById('saldo-detail').textContent = '—';
+    return;
+  }
+
+  /* LIMIT (método de la academia): ASK × (1 + plan%) + Plus por contrato ÷ 100.
+     El Plus ($2 por contrato) va sumado al precio de cada contrato, así que el LIMIT es el MISMO
+     para 1 contrato o para 100. */
+  const n           = Math.max(1, Math.floor(contratos) || 1);
+  const limitRaw    = ask * (1 + plan / 100) + plus / 100;
+  const limit       = ceilTick(limitRaw);
+
+  /* Comisión real estimada (IBKR Fixed), solo para comprobar el saldo: máx(mínimo, $0.65 × contratos) por lado */
+  const comTotal  = 2 * Math.max(1.00, 0.65 * n);
+  const coste     = ask * 100 * n;
+  const saldo     = monto * 0.5;                               // sin contar ganancias futuras
+
+  document.getElementById('res-limit').textContent     = '$' + limit.toFixed(2);
+  document.getElementById('res-limit-sub').textContent = 'ASK × (1+plan) + $' + plus.toFixed(2) + ' por contrato';
+  document.getElementById('res-coste').textContent     = fmt(coste);
+  document.getElementById('res-saldo').textContent     = fmt(saldo);
+
+  const box    = document.getElementById('saldo-box');
+  const boxC   = document.getElementById('box-coste');
+  const status = document.getElementById('saldo-status');
+  const detail = document.getElementById('saldo-detail');
+
+  if (coste + comTotal <= saldo) {
+    box.className  = 'saldo-row ok';
+    boxC.className = 'result-box green';
+    status.textContent = '✅ Saldo suficiente';
+    detail.textContent = fmt(coste) + ' prima + ' + fmt(comTotal) + ' comis. vs ' + fmt(saldo) + ' disponible';
+  } else {
+    box.className  = 'saldo-row warn';
+    boxC.className = 'result-box red';
+    status.textContent = '⚠️ Saldo insuficiente';
+    detail.textContent = 'Necesitas ' + fmt(coste + comTotal) + ' (prima + comis.) pero tienes ' + fmt(saldo);
+  }
+}
+
+document.querySelectorAll('input').forEach(el => { el.addEventListener('input', calcular); el.addEventListener('change', calcular); });
+document.getElementById('monto').addEventListener('input', calcularMaxContratos);
+document.getElementById('monto').addEventListener('input', calcStock);
+
+/* ═══════════════════════════════════════════════════════════
+   CALCULADORA PRECIO OBJETIVO ACCIONES
+   ═══════════════════════════════════════════════════════════ */
+function calcStock() {
+  const price  = parseFloat(document.getElementById('sp-price').value);
+  const pct    = parseFloat(document.getElementById('sp-pct').value);
+  const qty    = parseInt(document.getElementById('sp-qty').value) || 0;
+  const monto  = parseFloat(document.getElementById('monto').value) || 0;
+  const porAcc = 0.005;   // IBKR Fixed: $ por acción
+  const minOrd = 1.00;    // mínimo por orden
+  const maxPct = 1;       // máximo: 1% del valor de la orden
+  const colch  = 0;       // colchón extra
+
+  const limitEl = document.getElementById('sp-limit'), detailEl = document.getElementById('sp-detail');
+  const resBox  = document.getElementById('sp-result-box'), warnEl = document.getElementById('sp-price-warn');
+  const ganVal  = document.getElementById('sp-ganancia-val'), ganDet = document.getElementById('sp-ganancia-detail');
+  const priceInput = document.getElementById('sp-price');
+
+  /* Comisión IBKR Fixed por orden: $0.005/acción, mínimo $1, máximo 1% del valor de la orden */
+  const comOrden = (valor) => {
+    let c = Math.max(minOrd, porAcc * qty);
+    if (!isNaN(maxPct) && maxPct > 0) c = Math.min(c, valor * maxPct / 100);
+    return c;
+  };
+
+  const maxOperacion = monto > 0 ? monto * 0.5 : null;
+  document.getElementById('sp-max-label').textContent = maxOperacion ? '· máximo por operación ' + fmt(maxOperacion) : '';
+
+  if (isNaN(price) || price <= 0 || isNaN(pct) || qty <= 0) {
+    limitEl.textContent = '—'; detailEl.textContent = '—'; ganVal.textContent = '—'; ganDet.textContent = '—';
+    resBox.style.borderColor = '#30363d'; warnEl.style.display = 'none'; priceInput.style.borderColor = '';
+    return;
+  }
+
+  const inversion = price * qty;
+  const comCompra = comOrden(inversion);
+  const objetivo  = inversion * (1 + pct / 100);
+
+  /* LIMIT = (inversión × (1 + objetivo) + comisión compra + comisión venta + colchón) ÷ cantidad.
+     La comisión de venta depende del propio LIMIT: se ajusta en dos pasadas. */
+  let comVenta = comOrden(objetivo);
+  let limitRaw = (objetivo + comCompra + comVenta + colch) / qty;
+  comVenta = comOrden(limitRaw * qty);
+  limitRaw = (objetivo + comCompra + comVenta + colch) / qty;
+  const limit = Math.ceil(limitRaw * 100 - 1e-9) / 100;          // siempre hacia arriba, al centavo
+
+  /* Ganancia real si se vende al LIMIT (el colchón no es un gasto, queda como ganancia extra) */
+  const comVentaReal = comOrden(limit * qty);
+  const neto   = limit * qty - inversion - comCompra - comVentaReal;
+  const netoPc = neto / inversion * 100;
+
+  const supera = maxOperacion && (inversion + comCompra) > maxOperacion;
+  warnEl.style.display = supera ? 'block' : 'none';
+  priceInput.style.borderColor = supera ? '#f85149' : '';
+
+  limitEl.textContent  = '$' + limit.toFixed(2);
+  detailEl.textContent = 'objetivo +' + pct.toFixed(2) + '% · comisiones ' + fmt(comCompra + comVentaReal);
+  resBox.style.borderColor = supera ? '#f85149' : '#238636';
+
+  ganVal.textContent = fmt(neto) + '  (' + netoPc.toFixed(2) + '%)';
+  ganDet.textContent = qty + ' acciones · inversión ' + fmt(inversion) + ' · comisión compra ' + fmt(comCompra) + ' + venta ' + fmt(comVentaReal);
+}
+
+cargarDatos();
+calcular();
+</script>
+</body>
+</html>
