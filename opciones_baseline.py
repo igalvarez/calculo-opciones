@@ -112,6 +112,18 @@ def market_open(now):
     return OPEN_MIN <= m < CLOSE_MIN
 
 
+# Yahoo da las opciones con ~15 min de retraso: una foto antes de las 9:45 ET todavia muestra
+# cotizaciones de ANTES de la apertura. Por eso collect no guarda nada antes de esa hora.
+DATA_START_MIN = 9 * 60 + 45
+
+
+def data_open(now):
+    if now.weekday() >= 5:
+        return False
+    m = minutes_since_midnight(now)
+    return DATA_START_MIN <= m < CLOSE_MIN
+
+
 # ----------------------------------------------------------------------------------------
 # Proveedores de datos
 # ----------------------------------------------------------------------------------------
@@ -681,13 +693,14 @@ def cmd_collect(args, provider):
     tickers = read_tickers(args.tickers, args.prem_min, args.prem_max)
     while True:
         now = datetime.now(ET)
-        if not market_open(now) and not args.force:
-            if args.loop and now.weekday() < 5 and minutes_since_midnight(now) < OPEN_MIN:
-                wait = (OPEN_MIN - minutes_since_midnight(now)) * 60
-                print(f"Mercado cerrado. Espero {wait // 60} min hasta las 9:30 ET...")
+        if not data_open(now) and not args.force:
+            if args.loop and now.weekday() < 5 and minutes_since_midnight(now) < DATA_START_MIN:
+                wait = (DATA_START_MIN - minutes_since_midnight(now)) * 60
+                print(f"Todavia no hay datos fiables (Yahoo va con retraso). Espero {wait // 60} min hasta las 9:45 ET...")
                 time.sleep(wait)
                 continue
-            print("Mercado cerrado (bid/ask no fiables). Usa --force para guardar igualmente.")
+            print(f"[{now.strftime('%H:%M')} ET] Fuera de horario de datos fiables (9:45-16:00 ET, lunes a viernes): no se guarda nada. "
+                  "Usa --force para guardar igualmente.")
             return
         print(f"[{now.strftime('%H:%M:%S')} ET] foto de {len(tickers)} tickers...")
         rows = snapshot(provider, tickers, now, pause=args.pause)
