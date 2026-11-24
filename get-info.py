@@ -1939,21 +1939,320 @@ def _pre_signed(v):
 def _trim(v,n):
     v=" ".join(str(v or "").split()); return v if len(v)<=n else v[:n-1]+"…"
 
-def fetch_pre_futures():
+# ─── PREMARKET v3: hora ET, frescura de datos, noticias filtradas y reacción a earnings ──────────
+def _et_offset_hours(d):
+    """UTC -> ET: EDT (-4) del 2º domingo de marzo al 1º de noviembre; EST (-5) el resto."""
+    mar1=datetime.date(d.year,3,1); dst_start=mar1+datetime.timedelta(days=(6-mar1.weekday())%7+7)
+    nov1=datetime.date(d.year,11,1); dst_end=nov1+datetime.timedelta(days=(6-nov1.weekday())%7)
+    return -4 if dst_start<=d<dst_end else -5
+
+def _utc_now(): return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+def _from_epoch(ts): return datetime.datetime.fromtimestamp(ts,datetime.timezone.utc).replace(tzinfo=None)
+def _utc_to_et(dt_utc): return dt_utc+datetime.timedelta(hours=_et_offset_hours(dt_utc.date()))
+def _et_now(): return _utc_to_et(_utc_now())
+
+def _since_last_close_utc():
+    """Instante (UTC) del último cierre regular: 16:00 ET del día hábil anterior a hoy."""
+    d=_et_now().date()-datetime.timedelta(days=1)
+    while d.weekday()>=5: d-=datetime.timedelta(days=1)
+    return datetime.datetime.combine(d,datetime.time(16,0))-datetime.timedelta(hours=_et_offset_hours(d))
+
+def _yahoo_chart(symbol,rng="1d",interval="5m"):
     from urllib.parse import quote
-    out=[]; states=[]
-    for label,symbol in [("DOW","YM=F"),("S&P 500","ES=F"),("NASDAQ 100","NQ=F")]:
-        pct=None; state="UNKNOWN"
+    u=("https://query1.finance.yahoo.com/v8/finance/chart/"+quote(symbol)+
+       f"?interval={interval}&range={rng}&includePrePost=true")
+    return requests.get(u,headers=_pre_headers(),timeout=12).json()["chart"]["result"][0]
+
+def fetch_pre_futures():
+    """Devuelve (lista [(etiqueta,pct)], en_vivo, info). 'en_vivo' se decide por la EDAD del último dato
+    (no por el marketState de Yahoo, que a veces marca CLOSED con los futuros operando).
+    Russell 2000 se mide con el futuro RTY=F: es 24h y no depende del estado del ETF IWM."""
+    out=[]; info=[]
+    for label,symbol in [("DOW","YM=F"),("S&P 500","ES=F"),("NASDAQ 100","NQ=F"),("RUSSELL 2000","RTY=F")]:
+        pct=None; d=dict(symbol=symbol,state="?",last=None,prev=None,age=None,hora="")
         try:
-            u="https://query1.finance.yahoo.com/v8/finance/chart/"+quote(symbol)+"?interval=5m&range=1d&includePrePost=true"
-            m=requests.get(u,headers=_pre_headers(),timeout=12).json()["chart"]["result"][0]["meta"]
+            res=_yahoo_chart(symbol); m=res["meta"]
             last=m.get("regularMarketPrice"); prev=m.get("chartPreviousClose") or m.get("previousClose")
-            state=str(m.get("marketState") or "UNKNOWN").upper()
+            d.update(state=str(m.get("marketState") or "?").upper(),last=last,prev=prev)
+            ts=m.get("regularMarketTime")
+            if not ts:
+                tss=res.get("timestamp") or []; ts=tss[-1] if tss else None
+            if ts:
+                d["age"]=(_utc_now()-_from_epoch(ts)).total_seconds()/60
+                d["hora"]=_utc_to_et(_from_epoch(ts)).strftime("%H:%M")
             if last is not None and prev: pct=(float(last)/float(prev)-1)*100
         except Exception: pass
-        out.append((label,pct)); states.append(state)
-    active=any(x in {"PRE","PREPRE","REGULAR","POST","POSTPOST"} for x in states)
-    return out,active
+        out.append((label,pct)); info.append(d)
+    live=any(i["age"] is not None and i["age"]<=30 for i in info)
+    return out,live,info
+
+def _stock_snapshot(symbol):
+    """Movimiento ACTUAL (premarket o regular) y after-hours de ayer, frente al último cierre regular.
+    Usa velas de 5 min (5 días) con horario extendido; el 'cierre' es la última vela regular (~16:00)."""
+    try: res=_yahoo_chart(symbol,"5d","5m")
+    except Exception: return None
+    try:
+        ts=res.get("timestamp") or []
+        closes=(((res.get("indicators") or {}).get("quote") or [{}])[0].get("close")) or []
+        bars=[(_utc_to_et(_from_epoch(t)),float(c)) for t,c in zip(ts,closes) if c is not None]
+        if not bars: return None
+        today=_et_now().date()
+        reg=[(e,c) for e,c in bars if datetime.time(9,30)<=e.time()<datetime.time(16,0) and e.date()<today]
+        if not reg: return None
+        prev_close=reg[-1][1]; prev_date=reg[-1][0].date()
+        post=[c for e,c in bars if e.date()==prev_date and e.time()>=datetime.time(16,0)]
+        now_bars=[(e,c) for e,c in bars if e.date()>=today]
+        ah=((post[-1]/prev_close-1)*100 if post else None)
+        if now_bars:
+            e_last,c_last=now_bars[-1]; fuente="premarket" if e_last.time()<datetime.time(9,30) else "regular"
+        else:
+            # Antes de las 4:00 ET Yahoo aún no tiene velas de hoy: lo último que hay es el after-hours de ayer.
+            post_bars=[(e,c) for e,c in bars if e.date()==prev_date and e.time()>=datetime.time(16,0)]
+            if not post_bars: return None
+            e_last,c_last=post_bars[-1]; fuente="after-hours"
+        return dict(prev_close=prev_close,last=c_last,pct=(c_last/prev_close-1)*100,ah=ah,
+                    hora=e_last.strftime("%a %H:%M") if fuente=="after-hours" else e_last.strftime("%H:%M"),fuente=fuente)
+    except Exception: return None
+
+def fetch_pre_movers(tickers):
+    """{ticker: snapshot} en paralelo; los que fallan simplemente no aparecen."""
+    from concurrent.futures import ThreadPoolExecutor
+    snaps={}
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for t,sn in zip(tickers,ex.map(_stock_snapshot,tickers)):
+            if sn: snaps[t]=sn
+    return snaps
+
+# ── Noticias: Yahoo + Google News, filtradas por relevancia para la apertura ─────────────────────
+_NEWS_MACRO=[(r"\b(fed|fomc|powell|rate (cut|hike)s?|interest rates?)\b","FED",5),
+             (r"\b(cpi|ppi|inflation|pce|jobs report|payrolls?|jobless|unemployment|gdp|retail sales|ism|pmi)\b","MACRO",3),
+             (r"\b(treasur(y|ies)|bond yields?|yields?)\b","MACRO",3),
+             (r"\b(tariffs?|trade war|sanctions?|export controls?|shutdown|debt ceiling)\b","POLÍTICA",3),
+             (r"\b(oil|crude|opec)\b","ENERGÍA",2),
+             (r"\b(war|ceasefire|missile|iran|israel|ukraine|taiwan)\b","GEOPOL.",2),
+             (r"\b(ipo)\b","IPO",2)]
+_NEWS_EARN=r"\b(earnings|results|beats?|misses?|guidance|outlook|forecast|raises?|cuts?|revenue|profit warning|eps)\b"
+_NEWS_MKT=r"\b(futures|pre-?market|wall street|stock market today|markets? wrap|stocks? (rise|fall|slip|surge|drop|waver|slide))\b"
+_NEWS_MOVE=r"\b(surge[sd]?|plunge[sd]?|soar(s|ed)?|tumbl(e|es|ed)|jump(s|ed)?|sink(s)?|slump(s|ed)?|rall(y|ies|ied)|crash(es|ed)?|spike[sd]?)\b"
+_NEWS_JUNK=r"(should you buy|best stocks?|top stocks?|stocks? to buy|here'?s why|is it too late|reasons? to|motley fool|zacks|insider monkey|24/7 wall st|forever stock|millionaire|retire|dividend (stock|king)|\b\d+ (stocks?|reasons?|things?)\b)"
+_NEWS_OFFTOPIC=r"\b(uk|u\.k\.|europe(an)?|india|nifty|sensex|japan|nikkei|hang seng|australia|canada|brazil)\b"
+_NEWS_TOP_SOURCES=("reuters","bloomberg","cnbc","wsj","wall street journal","marketwatch","barron","associated press","financial times","yahoo finance","investopedia")
+_NEWS_CORE=("nvidia","nvda","tesla","tsla","apple","aapl","amd","advanced micro","meta","alphabet","google","amazon","amzn","microsoft","msft")
+_NEWS_AMBIGUOUS_TICKERS={"low","now","dash","coin","hood","ba","c","v","ma","li","ci"}
+_GOOGLE_QUERIES=["stock futures premarket","Wall Street stocks Fed Treasury yields","premarket movers earnings","stock market today Nasdaq S&P 500","earnings after the bell results stock moves","earnings before the bell results stock"]
+
+def _parse_rss_items(content):
+    """RSS -> [dict(headline, dt UTC naive, source, link)]. Valido para Google News y Yahoo."""
+    import xml.etree.ElementTree as ET, email.utils
+    items=[]
+    for it in ET.fromstring(content).findall(".//item"):
+        title=(it.findtext("title") or "").strip(); dt=None
+        pub=it.findtext("pubDate")
+        if pub:
+            try:
+                dt=email.utils.parsedate_to_datetime(pub)
+                dt=dt.astimezone(datetime.timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+            except Exception: dt=None
+        se=it.find("source"); src=(se.text or "").strip() if se is not None else ""
+        if src and title.endswith(" - "+src): title=title[:-len(src)-3].strip()
+        if title: items.append(dict(headline=title,dt=dt,source=src,link=(it.findtext("link") or "").strip()))
+    return items
+
+def fetch_pre_news_pool(extra_names=(),extra_tickers=()):
+    """Reúne candidatos de Google News (RSS), Yahoo (RSS + yfinance) y, si no hay nada, Finviz.
+    Devuelve (items, conteo_por_origen)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from urllib.parse import quote_plus
+    def rss(url,origin):
+        try:
+            r=requests.get(url,headers=_pre_headers(),timeout=12); r.raise_for_status()
+            its=_parse_rss_items(r.content)
+            for x in its: x["origin"]=origin; x["is_pr"]=x.get("source","") in PR_SOURCES
+            return its
+        except Exception: return []
+    def gurl(q): return "https://news.google.com/rss/search?q="+quote_plus(q+" when:1d")+"&hl=en-US&gl=US&ceid=US:en"
+    jobs=[(gurl(q),"Google") for q in _GOOGLE_QUERIES]+[(gurl(n+" stock"),"Google") for n in extra_names]
+    jobs.append(("https://finance.yahoo.com/news/rssindex","Yahoo"))
+    pool=[]
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for its in ex.map(lambda j: rss(*j),jobs): pool+=its
+    for t in ["SPY","QQQ"]+list(extra_tickers):                                      # yfinance (Yahoo)
+        try: pool+=fetch_news_yahoo(t,10)
+        except Exception: pass
+    conteo={}
+    for x in pool: conteo[x.get("origin","?")]=conteo.get(x.get("origin","?"),0)+1
+    if not pool:                                    # último recurso
+        for h,o in fetch_pre_headlines(6): pool.append(dict(headline=h,dt=None,source=o,origin=o,is_pr=False))
+    return pool,conteo
+
+def _news_regexes():
+    import re
+    names={n.lower() for n in _EARNINGS.values() if len(n)>=4}
+    tick={t.lower() for t in _EARNINGS if len(t)>=3 and t.lower() not in _NEWS_AMBIGUOUS_TICKERS}
+    watch=re.compile(r"\b("+"|".join(re.escape(x) for x in sorted(names|tick,key=len,reverse=True))+r")\b",re.I)
+    core=re.compile(r"\b("+"|".join(re.escape(x) for x in _NEWS_CORE)+r")\b",re.I)
+    return watch,core
+
+def _news_score(item,watch_re,core_re):
+    import re
+    hl=(item.get("headline") or "").lower(); sc=0; tags=[]; macro=0
+    for pat,tag,wt in _NEWS_MACRO:
+        if re.search(pat,hl): macro+=wt; tags.append(tag)
+    sc+=min(macro,6)
+    earn=bool(re.search(_NEWS_EARN,hl)); mkt=bool(re.search(_NEWS_MKT,hl)); move=bool(re.search(_NEWS_MOVE,hl))
+    w=bool(watch_re.search(hl)); c=bool(core_re.search(hl))
+    if earn and (w or c): sc+=3; tags.insert(0,"EARNINGS")
+    elif earn: sc+=1
+    if w: sc+=2
+    if c: sc+=3
+    if mkt: sc+=2; tags.append("MERCADO")
+    if move: sc+=1
+    if re.search(_NEWS_JUNK,hl): sc-=6
+    if re.search(_NEWS_OFFTOPIC,hl) and not (w or c): sc-=3
+    if item.get("is_pr"): sc-=3
+    src=(item.get("source") or "").lower()
+    if any(x in src for x in _NEWS_TOP_SOURCES): sc+=1
+    dt=item.get("dt")
+    if dt and (_utc_now()-dt).total_seconds()<6*3600: sc+=1
+    macro_tags=[t for t in tags if t not in ("EARNINGS","MERCADO")]
+    if "EARNINGS" in tags: tag="EARNINGS"
+    elif macro_tags: tag=macro_tags[0]
+    elif w or c: tag="EMPRESA"
+    elif "MERCADO" in tags: tag="MERCADO"
+    else: tag=""
+    return sc,tag
+
+def pick_pre_news(items,limit=5,min_score=4):
+    """Solo lo publicado desde el cierre de ayer, con puntuación mínima, sin duplicados y máximo 'limit'."""
+    import re
+    watch_re,core_re=_news_regexes(); since=_since_last_close_utc(); scored=[]
+    for it in items:
+        dt=it.get("dt")
+        if not dt or dt<since: continue
+        sc,tag=_news_score(it,watch_re,core_re)
+        if sc>=min_score: scored.append(dict(it,score=sc,tag=tag))
+    scored.sort(key=lambda x:(x["score"],x["dt"]),reverse=True)
+    kept=[]; toks_kept=[]; por_tema={}
+    for it in scored:
+        hl=it["headline"].lower()
+        toks={w for w in re.findall(r"[a-z0-9]+",hl) if len(w)>3}
+        if any(len(toks&k)/max(1,len(toks|k))>=0.4 for k in toks_kept): continue    # misma noticia, otro medio
+        ent=core_re.search(hl) or watch_re.search(hl)
+        clave=ent.group(1).lower() if ent else (it["tag"] or "otra")
+        if por_tema.get(clave,0)>=2: continue                                         # no 5 titulares de lo mismo
+        por_tema[clave]=por_tema.get(clave,0)+1
+        kept.append(it); toks_kept.append(toks)
+        if len(kept)>=limit: break
+    return kept
+
+# ── Earnings de ayer (AC) / hoy (BO): reacción en premarket y lectura para la apertura ──────────
+_SECTOR_LINK=[(("NVDA","AMD","MU","AVGO","INTC","QCOM","TXN","ADI","MRVL","LRCX","AMAT","KLAC"),"semis → puede arrastrar a SOXL/SMH/QQQ"),
+              (("AAPL","MSFT","GOOGL","META","AMZN","TSLA","NFLX","ORCL","NOW","PLTR","IBM"),"gran tecnología → pesa en QQQ/SPY"),
+              (("WMT","HD","LOW","COST","MCD","DASH","UBER","LYFT"),"consumo/comercio → XRT/XLY"),
+              (("BABA","LI","NIO","XPEV"),"China → FXI/KWEB"),(("COIN","HOOD"),"cripto → IBIT"),
+              (("JPM","BAC","C","GS","V","MA","AXP","PYPL"),"financieras/pagos → XLF"),
+              (("PFE","MRNA","CVS","LLY","JNJ","UNH"),"salud → XLV/XBI"),(("CCL","RCL","AAL","DAL","BA"),"viajes/aviación")]
+
+def _gap_reading(pct,ah,evidence):
+    """Lectura corta para la apertura. Heurística, no predicción."""
+    import re
+    a=abs(pct); d="alcista" if pct>0 else "bajista"
+    if a<1: txt="reacción pequeña: apertura probablemente sin gap relevante"
+    elif a<3: txt=f"gap {d} moderado: lo normal es abrir con gap y FUERA de Bollinger (caso 2)"
+    else: txt=f"gap {d} fuerte: espera apertura expuesta fuera de las bandas; no entres hasta que toque la banda"
+    ev=(evidence or "").lower()
+    pos=bool(re.search(r"\b(beats?|tops|raises?|surge[sd]?|strong|record)\b",ev)); neg=bool(re.search(r"\b(misses?|cuts?|lowers?|weak|warns?|plunge[sd]?)\b",ev))
+    if pos and pct<=-1: txt+=" · ojo: resultados buenos pero cae (guía/valoración)"
+    elif neg and pct>=1: txt+=" · ojo: resultados flojos pero sube (castigo ya descontado)"
+    if ah is not None and abs(ah-pct)>=2:
+        estado="se ha revertido" if ah*pct<0 else ("se ha diluido" if abs(pct)<abs(ah) else "se ha ampliado")
+        txt+=f" · after-hours de ayer {ah:+.1f}% → ahora {pct:+.1f}%: la reacción {estado}"
+    return txt
+
+_NEWS_PREVIEW=r"\b(preview|ahead of|what to expect|expected to|will report|to report|set to report|earnings calendar|week ahead|before earnings)\b"
+_NEWS_ANALYST=r"(price targets?|target price|upgrades?|downgrades?|initiates|reiterates|rating)"
+_NEWS_RESULT=r"\b(beats?|tops?|misses?|results|guidance|outlook|forecast|earnings|revenue|profit|sales)\b"
+
+def _earnings_evidence(t,name,pool,since):
+    """Titular reciente que habla de RESULTADOS de la empresa (no avances ni notas de analistas)."""
+    import re
+    ex=re.escape(t.lower()) if (len(t)>=3 and t.lower() not in _NEWS_AMBIGUOUS_TICKERS) else None
+    nm=re.compile(r"\b("+re.escape(name.lower())+(("|"+ex) if ex else "")+r")\b",re.I); best=None
+    for it in pool:
+        dt=it.get("dt"); h=it.get("headline") or ""
+        if not dt or dt<since or not nm.search(h): continue
+        if re.search(_NEWS_PREVIEW,h,re.I) or re.search(_NEWS_ANALYST,h,re.I) or not re.search(_NEWS_RESULT,h,re.I): continue
+        if best is None or dt>best[0]: best=(dt,h)
+    return best[1] if best else None
+
+def _earn_cache_path():
+    import os
+    try: return os.path.join(os.path.dirname(os.path.abspath(__file__)),"earnings_cache.json")
+    except NameError: return "earnings_cache.json"
+
+def _load_earn_cache():
+    """Memoria local {ticker: {fecha, hora}} con la última fecha de earnings que vio OptionSlam. Si no existe, {}."""
+    import json
+    try:
+        with open(_earn_cache_path(),encoding="utf-8") as f: d=json.load(f)
+        return d if isinstance(d,dict) else {}
+    except Exception: return {}
+
+def _save_earn_cache(nuevo):
+    import json
+    try:
+        d=_load_earn_cache(); d.update(nuevo)
+        with open(_earn_cache_path(),"w",encoding="utf-8") as f: json.dump(d,f,ensure_ascii=False,indent=0)
+    except Exception: pass                          # sin permisos de escritura: se sigue sin memoria
+
+def earnings_from_cache(cache):
+    """De la memoria local: quién reportó AYER tras el cierre (AC) y quién reporta HOY antes de abrir (BO)."""
+    hoy=_et_now().date(); ayer=hoy-datetime.timedelta(days=1)
+    while ayer.weekday()>=5: ayer-=datetime.timedelta(days=1)
+    out={}
+    for t,v in (cache or {}).items():
+        try: d=datetime.date.fromisoformat(v["fecha"])
+        except Exception: continue
+        if d==ayer and v.get("hora")=="AC": out[t]="AC ayer"
+        elif d==hoy and v.get("hora")=="BO": out[t]="BO hoy"
+    return out
+
+def fetch_pre_calendar_reporters(watch):
+    """Calendario de earnings del Nasdaq (mejor esfuerzo): {ticker: 'AC ayer' | 'BO hoy'}. Si falla, {}."""
+    hoy=_et_now().date(); ayer=hoy-datetime.timedelta(days=1)
+    while ayer.weekday()>=5: ayer-=datetime.timedelta(days=1)
+    wset={t.upper() for t in watch}|set(_EARNINGS_ALIAS); out={}
+    hdr=dict(_pre_headers("https://www.nasdaq.com/"),**{"Accept":"application/json, text/plain, */*","Origin":"https://www.nasdaq.com"})
+    for d,cuando in ((ayer,"ayer"),(hoy,"hoy")):
+        try:
+            r=requests.get("https://api.nasdaq.com/api/calendar/earnings",params={"date":d.isoformat()},headers=hdr,timeout=10)
+            rows=(((r.json() or {}).get("data") or {}).get("rows")) or []
+        except Exception: continue
+        for row in rows:
+            sym=(row.get("symbol") or "").upper(); tm=row.get("time") or ""
+            if sym not in wset: continue
+            sym=_EARNINGS_ALIAS.get(sym,sym)
+            if cuando=="ayer" and tm=="time-after-hours": out[sym]="AC ayer"
+            elif cuando=="hoy" and tm=="time-pre-market": out[sym]="BO hoy"
+    return out
+
+def build_pre_reactions(snaps,pool,hoy_bo,watch,cal=None,min_ah=4.0,cal_ok=None):
+    """Una fila por empresa tuya que reportó ayer (AC) o reporta hoy (BO), con su movimiento si hay precio.
+    La detección NO depende del tamaño del movimiento: basta un titular de resultados, el calendario del Nasdaq
+    o el de OptionSlam. Devuelve (filas, otros_movimientos_fuertes)."""
+    since=_since_last_close_utc(); cal=cal or {}; cal_ok=bool(cal) if cal_ok is None else cal_ok; rows=[]; otros=[]
+    for t in watch:
+        name=_EARNINGS.get(t,t); sn=snaps.get(t); ev=_earnings_evidence(t,name,pool,since)
+        if ev or t in hoy_bo or t in cal:
+            link=next((txt for ts,txt in _SECTOR_LINK if t in ts),"")
+            rows.append(dict(t=t,name=name,pct=(sn["pct"] if sn else None),ah=(sn["ah"] if sn else None),hora=(sn["hora"] if sn else ""),
+                             fuente=(sn["fuente"] if sn else ""),ev=ev,bo=(t in hoy_bo or cal.get(t)=="BO hoy"),cuando=cal.get(t,""),link=link,
+                             arrastre=(cal_ok and t not in cal and t not in hoy_bo),
+                             lectura=(_gap_reading(sn["pct"],sn["ah"],ev) if sn else "no pude obtener precio; revisa el titular")))
+        elif sn and (abs(sn["pct"])>=4 or (sn["ah"] is not None and abs(sn["ah"])>=min_ah)): otros.append((t,sn["pct"],sn["ah"]))
+    rows.sort(key=lambda r:abs(r["pct"]) if r["pct"] is not None else -1,reverse=True)
+    otros.sort(key=lambda x:max(abs(x[1]),abs(x[2] or 0)),reverse=True)
+    return rows,otros
 
 def fetch_pre_headlines(limit=2):
     import xml.etree.ElementTree as ET
@@ -2045,33 +2344,64 @@ _EARNINGS={
 "MSFT":"Microsoft","AAPL":"Apple","GOOGL":"Alphabet","META":"Meta","AMZN":"Amazon","TSLA":"Tesla","ORCL":"Oracle",
 "PLTR":"Palantir","NFLX":"Netflix","CSCO":"Cisco","MCD":"McDonald's","HD":"Home Depot","WMT":"Walmart","COST":"Costco",
 "JPM":"JPMorgan","BAC":"Bank of America","V":"Visa","MA":"Mastercard","AXP":"American Express","GS":"Goldman Sachs",
-"LLY":"Eli Lilly","JNJ":"Johnson & Johnson","UNH":"UnitedHealth","GE":"GE Aerospace","CAT":"Caterpillar","XOM":"Exxon Mobil","CVX":"Chevron"}
+"LLY":"Eli Lilly","JNJ":"Johnson & Johnson","UNH":"UnitedHealth","GE":"GE Aerospace","CAT":"Caterpillar","XOM":"Exxon Mobil","CVX":"Chevron",
+# ── ampliación ──
+"IBM":"IBM","NOW":"ServiceNow","DASH":"DoorDash","LYFT":"Lyft","UBER":"Uber","LOW":"Lowe's",
+"C":"Citigroup","PYPL":"PayPal","BABA":"Alibaba","LI":"Li Auto","NIO":"NIO","XPEV":"XPeng",
+"COIN":"Coinbase","HOOD":"Robinhood","CVS":"CVS Health","MRNA":"Moderna","PFE":"Pfizer",
+"BA":"Boeing","CCL":"Carnival","RCL":"Royal Caribbean","AAL":"American Airlines","DAL":"Delta Air Lines"}
+
+# ETFs / índices que sigues: NO publican earnings, así que no se consultan (evita ~11 peticiones inútiles).
+_EARNINGS_ETF={
+"SOXL":"Direxion Semiconductor Bull 3x","DIA":"SPDR Dow Jones","QQQ":"Invesco QQQ","SPY":"SPDR S&P 500",
+"SPX":"S&P 500 (índice)","IWM":"iShares Russell 2000","TNA":"Direxion Small Cap Bull 3x",
+"GLD":"SPDR Gold","SLV":"iShares Silver","USO":"US Oil Fund","URA":"Global X Uranium"}
+
+# Mismo emisor, misma fecha de resultados: se consulta una sola vez y se muestra "GOOGL/GOOG".
+_EARNINGS_ALIAS={"GOOG":"GOOGL"}
 
 def _optionslam(ticker):
-    import re
+    import re, time
     from bs4 import BeautifulSoup
+    r=None
+    for intento in range(2):                       # un reintento ante fallo puntual / límite de peticiones
+        try:
+            r=requests.get(f"https://www.optionslam.com/earnings/stocks/{ticker}",headers=_pre_headers("https://www.optionslam.com/"),timeout=15)
+            r.raise_for_status(); break
+        except Exception:
+            r=None
+            if intento==0: time.sleep(0.8)
+    if r is None: return None
     try:
-        r=requests.get(f"https://www.optionslam.com/earnings/stocks/{ticker}",headers=_pre_headers("https://www.optionslam.com/"),timeout=15); r.raise_for_status()
         text=" ".join(BeautifulSoup(r.text,"html.parser").get_text(" ",strip=True).split())
-        m=re.search(r"Next Earnings Date\s*:?\s*([A-Z][a-z]{2,8}\.?\s+\d{1,2},\s+\d{4})\s+(BO|AC)",text,re.I)
+        # La hora (BO/AC) es opcional: algunos ADR (BABA, NIO, LI...) pueden no traerla.
+        m=re.search(r"Next Earnings Date\s*:?\s*([A-Z][a-z]{2,8}\.?\s+\d{1,2},\s+\d{4})(?:\s+(BO|AC)\b)?",text,re.I)
         if not m: return None
         d=None
         for fmt in ("%b %d, %Y","%B %d, %Y"):
             try: d=datetime.datetime.strptime(m.group(1).replace(".",""),fmt).date(); break
             except ValueError: pass
         if not d: return None
-        est=bool(__import__('re').search(r"\bEstimated\b",text[max(0,m.start()-120):m.end()+120],__import__('re').I))
-        return d,m.group(2).upper(),est
+        est=bool(re.search(r"\bEstimated\b",text[max(0,m.start()-120):m.end()+120],re.I))
+        return d,(m.group(2) or "—").upper(),est
     except Exception: return None
 
-def fetch_pre_earnings(limit=30):
+def fetch_pre_earnings(limit=120):
     from concurrent.futures import ThreadPoolExecutor,as_completed
     today=datetime.date.today(); last=today+datetime.timedelta(days=6); out=[]
+    alias_de={}                                    # {"GOOGL":["GOOG"]}
+    for a,t in _EARNINGS_ALIAS.items(): alias_de.setdefault(t,[]).append(a)
+    consulta=[t for t in _EARNINGS if t not in _EARNINGS_ALIAS and t not in _EARNINGS_ETF]
+    memoria={}
     with ThreadPoolExecutor(max_workers=8) as ex:
-        jobs={ex.submit(_optionslam,t):t for t in _EARNINGS}
+        jobs={ex.submit(_optionslam,t):t for t in consulta}
         for job in as_completed(jobs):
             t=jobs[job]; v=job.result()
-            if v and today<=v[0]<=last: out.append((v[0],v[1],v[2],t,_EARNINGS[t]))
+            if v: memoria[t]={"fecha":v[0].isoformat(),"hora":v[1]}
+            if v and today<=v[0]<=last:
+                etiqueta="/".join([t]+alias_de.get(t,[]))
+                out.append((v[0],v[1],v[2],etiqueta,_EARNINGS.get(t,t)))
+    _save_earn_cache(memoria)                       # para saber mañana quién reportó hoy
     return sorted(out,key=lambda x:(x[0],x[1],x[3]))[:limit]
 
 def _agenda_time_value(day, time_text):
@@ -2102,15 +2432,75 @@ def _agenda_operational_alert(day, time_text):
     return "", ""
 
 
-def print_premarket_summary():
+def print_premarket_summary(debug=False):
     now=datetime.datetime.now(); print(f"\n{Fore.CYAN}{'='*82}{Style.RESET_ALL}")
     print(f"{Style.BRIGHT}  WALL STREET HOY — PREMARKET  {now:%d %B %Y}{Style.RESET_ALL}"); print(f"{Fore.CYAN}{'='*82}{Style.RESET_ALL}")
-    fut,active=fetch_pre_futures(); title="FUTUROS" if active else "FUTUROS — MERCADO CERRADO / ÚLTIMA SESIÓN"
+    fut,live,info=fetch_pre_futures()
+    title="FUTUROS (en vivo)" if live else "FUTUROS — MERCADO CERRADO / ÚLTIMA SESIÓN"
     print(f"\n{Fore.YELLOW}{Style.BRIGHT}{title}{Style.RESET_ALL}\n  "+"   ".join(f"{n}: {_pre_signed(v)}" for n,v in fut))
-    news=fetch_pre_headlines(2)
-    for i in range(2):
-        print(f"\n{Fore.CYAN}{i+1:02d}{Style.RESET_ALL}  {Style.BRIGHT}NOTICIA{Style.RESET_ALL}")
-        print("  "+(_trim(news[i][0],70)+f" {Fore.LIGHTBLACK_EX}({news[i][1]}){Style.RESET_ALL}" if i<len(news) else "Sin titular disponible."))
+    horas="  ".join(f"{n} {i['hora'] or 'n/d'}" for (n,_),i in zip(fut,info))
+    print(f"  {Fore.LIGHTBLACK_EX}Variación vs cierre anterior del contrato · último dato Yahoo (hora ET): {horas}{Style.RESET_ALL}")
+    viejos=[n for (n,_),i in zip(fut,info) if live and i["age"] is not None and i["age"]>30]
+    if viejos: print(f"  {Fore.YELLOW}⚠ dato con más de 30 min: {', '.join(viejos)}{Style.RESET_ALL}")
+    if debug:
+        print(f"  {Fore.LIGHTBLACK_EX}{'SÍMBOLO':<8} {'ESTADO':<9} {'ÚLTIMO':>10} {'PREVIO':>10} {'EDAD(min)':>10}{Style.RESET_ALL}")
+        for i in info:
+            print(f"  {Fore.LIGHTBLACK_EX}{i['symbol']:<8} {i['state']:<9} {str(i['last']):>10} {str(i['prev']):>10} {('%.1f'%i['age']) if i['age'] is not None else 'n/d':>10}{Style.RESET_ALL}")
+
+    cache_prev=earnings_from_cache(_load_earn_cache())      # lo recordado de ejecuciones anteriores (antes de actualizarlo)
+    ern=fetch_pre_earnings()
+    hoy=_et_now().date()
+    hoy_bo={x for d,h,est,t,c in ern if d==hoy and h=="BO" for x in t.split("/")}
+    watch=[t for t in _EARNINGS if t not in _EARNINGS_ALIAS and t not in _EARNINGS_ETF]
+    snaps=fetch_pre_movers(watch)
+    cal_nas=fetch_pre_calendar_reporters(watch)
+    cal=dict(cache_prev); cal.update(cal_nas)                # el calendario del Nasdaq manda; la memoria local lo completa
+    hoy_bo|={t for t,v in cal.items() if v=="BO hoy"}
+    fuertes=sorted([t for t,sn in snaps.items() if abs(sn["pct"])>=2 or (sn["ah"] is not None and abs(sn["ah"])>=3)],
+                   key=lambda t:max(abs(snaps[t]["pct"]),abs(snaps[t]["ah"] or 0)),reverse=True)
+    tk=list(dict.fromkeys(list(cal)+sorted(hoy_bo)+fuertes))[:10]
+    pool,conteo=fetch_pre_news_pool(extra_names=[_EARNINGS[t] for t in tk if t in _EARNINGS],extra_tickers=tk[:8])
+    if debug:
+        fu={}
+        for sn in snaps.values(): fu[sn["fuente"]]=fu.get(sn["fuente"],0)+1
+        print(f"\n  {Fore.LIGHTBLACK_EX}[debug] snapshots: {len(snaps)}/{len(watch)} {fu} · calendario Nasdaq: {cal_nas or 'sin datos'} · memoria local: {cache_prev or 'vacía'} · noticias por origen: {conteo or 'ninguna'}{Style.RESET_ALL}")
+
+    print(f"\n{Fore.CYAN}01{Style.RESET_ALL}  {Fore.YELLOW}{Style.BRIGHT}NOTICIAS QUE MUEVEN LA APERTURA (filtradas, desde el cierre de ayer){Style.RESET_ALL}")
+    top=pick_pre_news(pool,limit=5)
+    if top:
+        try: es=translate_headlines([x["headline"] for x in top])
+        except Exception: es=[x["headline"] for x in top]
+        for it,txt in zip(top,es):
+            col=Fore.YELLOW if it["tag"]=="EARNINGS" else Fore.CYAN
+            hora=_utc_to_et(it["dt"]).strftime("%a %H:%M")
+            print(f"  {Fore.LIGHTBLACK_EX}{hora} ET{Style.RESET_ALL} {col}[{it['tag'] or 'OTRA':<9}]{Style.RESET_ALL} {_trim(txt,86)} {Fore.LIGHTBLACK_EX}({it.get('source') or it.get('origin','')}){Style.RESET_ALL}")
+    else:
+        print(f"  {Fore.LIGHTBLACK_EX}Nada relevante desde el cierre de ayer según los filtros (macro, earnings, tus empresas).{Style.RESET_ALL}")
+
+    print(f"\n{Fore.CYAN}02{Style.RESET_ALL}  {Fore.YELLOW}{Style.BRIGHT}EARNINGS DE AYER (AC) / HOY (BO) — REACCIÓN Y LECTURA PARA LA APERTURA{Style.RESET_ALL}")
+    if snaps and all(sn["fuente"]=="after-hours" for sn in snaps.values()):
+        print(f"  {Fore.LIGHTBLACK_EX}Aún no hay velas de premarket (empiezan a las 4:00 ET): los precios son el after-hours de ayer.{Style.RESET_ALL}")
+    rows,otros=build_pre_reactions(snaps,pool,hoy_bo,watch,cal,cal_ok=bool(cal_nas))   # 'arrastre' solo si el calendario del Nasdaq respondió
+    if rows:
+        for r in rows[:6]:
+            if r["pct"] is None: mov="sin precio disponible"
+            else:
+                et={"after-hours":"after-hours de ayer","premarket":"premarket","regular":"sesión"}.get(r["fuente"],r["fuente"])
+                mov=f"{_pre_signed(r['pct'])} {et} ({r['hora']} ET)"
+            ah=f"  (after-hours ayer {r['ah']:+.1f}%)" if (r["ah"] is not None and r["fuente"]!="after-hours") else ""
+            marca=(f" {Fore.LIGHTBLACK_EX}[reporta HOY antes de abrir]{Style.RESET_ALL}" if r["bo"] else
+                   (f" {Fore.LIGHTBLACK_EX}[reportó AYER tras el cierre]{Style.RESET_ALL}" if r["cuando"]=="AC ayer" else
+                    (f" {Fore.LIGHTBLACK_EX}[no reportó según el calendario: reacción por arrastre]{Style.RESET_ALL}" if r.get("arrastre") else "")))
+            print(f"  {Style.BRIGHT}{r['t']:<6}{Style.RESET_ALL} {r['name']:<18} {mov}{ah}{marca}")
+            print(f"        → {r['lectura']}")
+            if r["link"]: print(f"        {Fore.LIGHTBLACK_EX}{r['link']}{Style.RESET_ALL}")
+            if r["ev"]: print(f"        {Fore.LIGHTBLACK_EX}“{_trim(r['ev'],92)}”{Style.RESET_ALL}")
+    else:
+        print(f"  {Fore.LIGHTBLACK_EX}Ninguna de tus empresas reportó ayer (AC) ni reporta hoy antes de abrir (según titulares y calendarios).{Style.RESET_ALL}")
+    if otros:
+        det=", ".join(f"{t} {v:+.1f}%"+(f" (AH ayer {a:+.1f}%)" if (a is not None and abs(a)>=4) else "") for t,v,a in otros[:8])
+        print(f"  {Fore.LIGHTBLACK_EX}Otros movimientos fuertes (≥4% ahora o en el after-hours de ayer) sin earnings detectados: {det}{Style.RESET_ALL}")
+
     print(f"\n{Fore.CYAN}03{Style.RESET_ALL}  {Fore.YELLOW}{Style.BRIGHT}AGENDA USA — ALTO IMPACTO ★★★ — PRÓXIMOS 7 DÍAS — ET{Style.RESET_ALL}")
     agenda,err,agenda_source=fetch_pre_agenda()
     if agenda:
@@ -2125,16 +2515,16 @@ def print_premarket_summary():
     elif err: print(f"  {Fore.RED}{err}.{Style.RESET_ALL}")
     else: print(f"  {Fore.LIGHTBLACK_EX}Sin eventos USA de alto impacto (★★★) en los próximos 7 días.{Style.RESET_ALL}")
     print(f"\n{Fore.CYAN}04{Style.RESET_ALL}  {Fore.YELLOW}{Style.BRIGHT}EARNINGS — PRÓXIMOS 7 DÍAS — GRANDES / SEMICONDUCTORES{Style.RESET_ALL}")
-    ern=fetch_pre_earnings()
     if ern:
-        print(f"  {Style.BRIGHT}{'FECHA':<12} {'HORA':<5} {'EST':<4} {'TICKER':<8} EMPRESA{Style.RESET_ALL}"); print("  "+"-"*58)
-        for d,h,est,t,c in ern: print(f"  {d:%d %b %Y}  {h:<5} {('EST' if est else ''):<4} {t:<8} {c}")
+        print(f"  {Style.BRIGHT}{'FECHA':<12} {'HORA':<5} {'EST':<4} {'TICKER':<11} EMPRESA{Style.RESET_ALL}"); print("  "+"-"*64)
+        for d,h,est,t,c in ern: print(f"  {d:%d %b %Y}  {h:<5} {('EST' if est else ''):<4} {t:<11} {c}")
     else: print(f"  {Fore.LIGHTBLACK_EX}Sin earnings en los próximos 7 días.{Style.RESET_ALL}")
     watched=["TSLA","GOOGL","META","MSFT","AMZN","ORCL"]
-    shown={row[3] for row in ern}
+    shown={x for row in ern for x in row[3].split("/")}
     missing=[t for t in watched if t not in shown]
     if missing: print(f"  {Fore.LIGHTBLACK_EX}Seguidas sin earnings en esta ventana: {', '.join(missing)}{Style.RESET_ALL}")
-    print(f"\n{Fore.LIGHTBLACK_EX}BO: before open | AC: after close | EST: estimated. Fuentes: Investing.com (primaria), Yahoo Finance (respaldo), Finviz, OptionSlam y Federal Reserve.{Style.RESET_ALL}\n")
+    print(f"  {Fore.LIGHTBLACK_EX}En la lista pero sin earnings (ETF/índice): {', '.join(_EARNINGS_ETF)}{Style.RESET_ALL}")
+    print(f"\n{Fore.LIGHTBLACK_EX}BO: before open | AC: after close | EST: estimated. Fuentes: Yahoo Finance, Google News, Investing.com, Finviz, OptionSlam y Federal Reserve.{Style.RESET_ALL}\n")
 
 
 # ─── AYUDA ────────────────────────────────────────────────────────────────────
@@ -2149,7 +2539,11 @@ def print_help():
   python get-info.py [FLAGS] TICKER1 [TICKER2 ... TICKER15]
 
 {Fore.YELLOW}FLAGS:{Style.RESET_ALL}
-  --pre       Resumen premarket, agenda USA ★★★ y earnings de los próximos 7 días.
+  --pre       Resumen premarket: futuros (DOW/S&P/NASDAQ/Russell 2000, con la hora del dato),
+              noticias filtradas que mueven la apertura (Yahoo + Google News), reacción de
+              earnings de ayer/hoy con una lectura para la apertura, agenda USA ★★★ y
+              earnings de los próximos 7 días (lista ampliada; los ETF se omiten).
+              Añade --debug para ver los datos crudos de cada fuente.
   --target    Muestra solo la tabla resumen de precios y targets.
               No muestra ratings ni insider trading.
 
@@ -2224,7 +2618,7 @@ def print_help():
 def main():
     args = sys.argv[1:]
     if "--pre" in args:
-        print_premarket_summary()
+        print_premarket_summary(debug="--debug" in args)
         return
 
     if "--help" in args:

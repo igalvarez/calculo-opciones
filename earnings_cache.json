@@ -1,0 +1,46 @@
+{
+"AVGO": {
+"fecha": "2026-12-09",
+"hora": "AC"
+},
+"ADI": {
+"fecha": "2026-11-24",
+"hora": "BO"
+},
+"MRVL": {
+"fecha": "2026-12-01",
+"hora": "AC"
+},
+"ORCL": {
+"fecha": "2026-12-14",
+"hora": "AC"
+},
+"WMT": {
+"fecha": "2026-11-19",
+"hora": "BO"
+},
+"COST": {
+"fecha": "2026-12-10",
+"hora": "AC"
+},
+"JPM": {
+"fecha": "2027-01-14",
+"hora": "BO"
+},
+"LOW": {
+"fecha": "2026-11-18",
+"hora": "BO"
+},
+"BABA": {
+"fecha": "2026-11-19",
+"hora": "BO"
+},
+"LI": {
+"fecha": "2026-11-25",
+"hora": "BO"
+},
+"NIO": {
+"fecha": "2026-12-01",
+"hora": "BO"
+}
+}
