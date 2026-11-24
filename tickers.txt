@@ -1,5 +1,7 @@
-# Tus tickers (uno por linea). Rango de prima opcional por ticker: SIMBOLO prima_min prima_max
-# Si no pones rango, se usa el de --prem-min / --prem-max (por defecto 0,30 - 0,60)
+# Tickers a vigilar (uno por linea). El rango de prima de cada uno sale de rp.xls (Excel de la academia),
+# que es la fuente de verdad: si actualizas rp.xls, los rangos se actualizan solos.
+# Un ticker que NO este en rp.xls no se vigila y se avisa en la pagina (ahora: GS y CAT).
+# Para fijar un rango propio escribe:  SIMBOLO prima_min prima_max   (en $ por accion, con coma decimal), p. ej.:  GS 3,00 6,00
 SPY
 QQQ
 IWM
