@@ -7,8 +7,8 @@ on:
     # la hora real de NY y, fuera de 9:45-16:00, el resto del flujo se salta (casi no gasta minutos).
     # Cada 15 min en las primeras horas (cuando operas) y cada 30 min despues.
     # Se evitan los minutos :00 y :30 porque GitHub se satura y retrasa o descarta ejecuciones.
-    - cron: "7,22,37,52 13-16 * * 1-5"
-    - cron: "7,37 17-20 * * 1-5"
+    - cron: "9,24,39,54 13-16 * * 1-5"
+    - cron: "9,39 17-20 * * 1-5"
   workflow_dispatch:
     inputs:
       prueba:
