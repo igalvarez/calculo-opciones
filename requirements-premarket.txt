@@ -1,0 +1,8 @@
+requests
+colorama
+finviz
+lxml
+beautifulsoup4
+yfinance
+pandas
+tzdata

@@ -1,0 +1,110 @@
+# Guardar en el repo como:  .github/workflows/premarket.yml
+#
+# Publica en GitHub Pages el resumen premarket (el mismo de `python get-info.py --pre`) en  docs/premarket/index.html
+# SOLO 3 veces por dia de mercado, a las 8:00, 8:30 y 9:15 hora de Nueva York (la bolsa abre a las 9:30).
+name: premarket
+
+on:
+  schedule:
+    # Hora UTC. GitHub no entiende de horario de verano (EDT = UTC-4, EST = UTC-5), asi que cada franja se lanza
+    # en las dos horas UTC posibles y `publicar_premarket.py` decide con la hora REAL de Nueva York si toca publicar
+    # (la otra pasada del par se descarta sola). Se usan los minutos :03, :33 y :18 porque GitHub se satura y retrasa
+    # o descarta ejecuciones en los minutos :00 y :30.
+    - cron: "3 12,13 * * 1-5"    # franja 8:00 NY
+    - cron: "33 12,13 * * 1-5"   # franja 8:30 NY
+    - cron: "18 13,14 * * 1-5"   # franja 9:15 NY
+  workflow_dispatch:
+    inputs:
+      forzar:
+        description: "Forzar: publica ahora mismo aunque no sea una de las 3 franjas ni dia de mercado (para probar)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: premarket
+  cancel-in-progress: false
+
+jobs:
+  premarket:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      publish: ${{ steps.save.outputs.publish }}
+    steps:
+      # Filtro barato antes de instalar nada: lunes a viernes entre las 8:00 y las 9:35 de Nueva York.
+      # El filtro fino (franjas exactas, festivos, "ya publicado") lo hace publicar_premarket.py.
+      - name: Comprobar hora de Nueva York
+        id: mh
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          dow=$(TZ=America/New_York date +%u)
+          hm=$((10#$(TZ=America/New_York date +%H%M)))
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "Ejecucion manual"
+          elif [ "$dow" -le 5 ] && [ "$hm" -ge 800 ] && [ "$hm" -lt 935 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "En ventana (NY $hm)"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "Fuera de ventana (NY dia $dow, $hm): no se hace nada"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.mh.outputs.run == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.mh.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-premarket.txt
+
+      - name: Instalar dependencias
+        if: steps.mh.outputs.run == 'true'
+        run: pip install -r requirements-premarket.txt
+
+      - name: Generar pagina premarket
+        id: gen
+        if: steps.mh.outputs.run == 'true'
+        run: python publicar_premarket.py ${{ github.event_name == 'workflow_dispatch' && inputs.forzar && '--forzar' || '' }}
+
+      - name: Guardar en el repo
+        id: save
+        if: steps.gen.outputs.generado == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/premarket
+          if git diff --cached --quiet; then
+            echo "Sin cambios que guardar"
+          else
+            git commit -m "premarket $(date -u +%Y-%m-%dT%H:%MZ)"
+            git pull --rebase
+            git push
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Preparar pagina para GitHub Pages
+        if: steps.save.outputs.publish == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  # Publica la pagina. Si GitHub Pages no esta activado (o el repo es privado en plan gratuito), este trabajo falla
+  # pero NO afecta a la generacion de la pagina (continue-on-error), igual que en collect.yml.
+  deploy:
+    needs: premarket
+    if: needs.premarket.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
