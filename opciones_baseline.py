@@ -23,6 +23,7 @@ Uso:
   python opciones_baseline.py collect --tickers tickers.txt --loop --every 15
   python opciones_baseline.py report  --tickers tickers.txt
   python opciones_baseline.py check   --tickers tickers.txt
+  python opciones_baseline.py html    --tickers tickers.txt --out docs/index.html
   python opciones_baseline.py demo                  (prueba con datos simulados, sin internet)
 
 Formato de tickers.txt (uno por linea; el rango de prima por ticker es opcional):
@@ -420,8 +421,8 @@ def _ratio(r):
     return out
 
 
-def simplify_check(out):
-    """Un veredicto por ticker: ESTRESADO / OK / sin baseline / sin contrato (habitual)."""
+def status_rows(out):
+    """Un veredicto por ticker y vencimiento (estructurado). key: bad / ok / na."""
     groups = {}
     for r in out:
         groups.setdefault((r["ticker"], r["dte"]), []).append(r)
@@ -431,37 +432,41 @@ def simplify_check(out):
         ok = [r for r in rs if r["estado"] == "normal"]
         if stressed:
             r = max(stressed, key=_ratio)
-            status = "ESTRESADO" if r["estado"] == "ANORMAL" else "ESTRESADO (sin contrato en rango)"
+            if r["estado"] == "ANORMAL":
+                key, text = "bad", "ESTRESADO"
+            else:
+                key, text = "bad", "ESTRESADO (sin contrato en rango)"
             rank = 0
         elif ok:
-            r, status, rank = max(ok, key=_ratio), "OK", 1
+            r, key, text, rank = max(ok, key=_ratio), "ok", "OK", 1
         elif any(x["estado"] == "sin baseline" for x in rs):
-            r, status, rank = rs[0], "sin baseline", 2
+            r, key, text, rank = rs[0], "na", "sin baseline", 2
         else:
-            r, status, rank = rs[0], "sin contrato (habitual)", 2
-        k_now, k_nor = r.get("strikes_ahora"), r.get("strikes_normal")
-        s_now, s_nor = r.get("spread$ct_ahora"), r.get("spread$ct_normal")
+            r, key, text, rank = rs[0], "na", "sin contrato (habitual)", 2
         rows.append({
-            "ticker": tk, "venc": dte, "estado": status,
+            "ticker": tk, "venc": dte, "key": key, "text": text, "rank": rank, "ratio": _ratio(r),
+            "strikes_now": r.get("strikes_ahora"), "strikes_norm": r.get("strikes_normal"),
+            "spread_now": r.get("spread$ct_ahora"), "spread_norm": r.get("spread$ct_normal"),
+            "motivo": r.get("motivo", ""),
+        })
+    return rows
+
+
+def simplify_check(out):
+    """Tabla de texto: ESTRESADO / OK / sin baseline / sin contrato (habitual)."""
+    rows = []
+    for r in sorted(status_rows(out), key=lambda x: (x["rank"], -x["ratio"], x["ticker"])):
+        k_now, k_nor, s_now, s_nor = r["strikes_now"], r["strikes_norm"], r["spread_now"], r["spread_norm"]
+        rows.append({
+            "ticker": r["ticker"], "venc": r["venc"], "estado": r["text"],
             "strikes (ahora / normal)": f"{fmt_n(k_now)} / {fmt_n(k_nor)}" if k_now is not None and not pd.isna(k_now) else "-",
             "spread$ (ahora / normal)": f"{fmt(s_now, 1)} / {fmt(s_nor, 1)}" if s_now is not None and not pd.isna(s_now) else "-",
-            "_rank": rank, "_ratio": -_ratio(r),
         })
-    return pd.DataFrame(rows).sort_values(["_rank", "_ratio", "ticker"]).drop(columns=["_rank", "_ratio"])
+    return pd.DataFrame(rows)
 
 
-def cmd_check(args, provider):
-    df = load(args.csv, args.bucket_minutes)
-    tickers = read_tickers(args.tickers, args.prem_min, args.prem_max)
-    if args.only:
-        wanted = {s.strip().upper() for s in args.only.split(",")}
-        tickers = [t for t in tickers if t[0] in wanted]
-    now = datetime.now(ET) if not hasattr(provider, "now") else provider.now
-    if isinstance(provider, YahooProvider) and not market_open(now):
-        print("AVISO: mercado cerrado; los bid/ask de Yahoo no son fiables fuera de horario.")
-    rows = snapshot(provider, tickers, now, pause=args.pause, verbose=False)
-    if args.save:
-        append_csv(args.csv, rows)
+def evaluate(rows, df, now, args):
+    """Compara filas (foto actual) con el baseline guardado `df`. Devuelve una lista de registros."""
     tb = time_bucket(now, args.bucket_minutes)
     out = []
     for r in rows:
@@ -473,19 +478,23 @@ def cmd_check(args, provider):
         if len(sub) < args.min_n:
             sub, scope = base, "todo el dia"
         rec = {"ticker": r["ticker"], "lado": r["side"], "dte": r["dte_bucket"], "base": scope, "n": len(sub)}
-        if not r["in_range"]:
-            # ¿Es habitual no tener contrato en rango para este ticker? (cadenas con pocos strikes)
-            usual = 100 * len(base) / len(allb) if len(allb) else float("nan")
-            if len(allb) >= 5 and usual < 80:
+        if not bool(r["in_range"]):
+            # ¿Es habitual no tener contrato en rango? Se compara con la MISMA franja horaria si hay datos
+            # (cerca del cierre las primas se hunden y es normal que falten contratos en tu rango).
+            ref = allb[allb["tbucket"] == tb]
+            if len(ref) < args.min_n:
+                ref = allb
+            usual = 100 * float(ref["in_range"].mean()) if len(ref) else float("nan")
+            if len(ref) >= 5 and usual < 80:
                 rec.update({"estado": "sin contrato en rango (habitual)",
                             "motivo": f"normalmente solo hay contrato en rango en el {fmt(usual, 0)}% de las fotos"})
             else:
                 rec.update({"estado": "SIN CONTRATO EN RANGO",
                             "motivo": "ninguna prima dentro de tu rango"
-                                      + (f" (normalmente si hay, {fmt(usual, 0)}% de las fotos)" if len(allb) else "")})
+                                      + (f" (normalmente si hay, {fmt(usual, 0)}% de las fotos)" if len(ref) else "")})
             out.append(rec)
             continue
-        cur_k, cur_s = float(r["tgt_dist_steps"]), r["tgt_spread"] * 100
+        cur_k, cur_s = float(r["tgt_dist_steps"]), float(r["tgt_spread"]) * 100
         rec.update({"strikes_ahora": cur_k, "dist$_ahora": r["tgt_dist_usd"], "spread$ct_ahora": cur_s})
         if len(sub) < 3:
             rec.update({"estado": "sin baseline", "motivo": "faltan datos guardados"})
@@ -503,6 +512,22 @@ def cmd_check(args, provider):
         rec.update({"strikes_normal": med_k, "spread$ct_normal": med_s,
                     "estado": "ANORMAL" if why else "normal", "motivo": "; ".join(why)})
         out.append(rec)
+    return out
+
+
+def cmd_check(args, provider):
+    df = load(args.csv, args.bucket_minutes)
+    tickers = read_tickers(args.tickers, args.prem_min, args.prem_max)
+    if args.only:
+        wanted = {s.strip().upper() for s in args.only.split(",")}
+        tickers = [t for t in tickers if t[0] in wanted]
+    now = datetime.now(ET) if not hasattr(provider, "now") else provider.now
+    if isinstance(provider, YahooProvider) and not market_open(now):
+        print("AVISO: mercado cerrado; los bid/ask de Yahoo no son fiables fuera de horario.")
+    rows = snapshot(provider, tickers, now, pause=args.pause, verbose=False)
+    if args.save:
+        append_csv(args.csv, rows)
+    out = evaluate(rows, df, now, args)
     print(f"\nCHECK  {now.strftime('%Y-%m-%d %H:%M')} ET")
     if getattr(args, "detalle", False):
         print(f"(ANORMAL si supera max(p90, {fmt(args.factor, 1)} x mediana); strikes: ademas >= 2 por encima de lo tipico)\n")
@@ -511,6 +536,143 @@ def cmd_check(args, provider):
     print("  OK        = strikes y spread dentro de lo normal")
     print("  ESTRESADO = tu contrato esta mas lejos del ATM (en strikes) o el spread es mas ancho de lo normal (no operar)\n")
     print(simplify_check(out).to_string(index=False))
+
+
+HTML_TEMPLATE = """<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="300">
+<title>Opciones: estado ahora</title>
+<style>
+:root{--bg:#ffffff;--fg:#1f2328;--muted:#656d76;--card:#f6f8fa;--line:#d0d7de;
+--ok-bg:#dafbe1;--ok-fg:#116329;--bad-bg:#ffebe9;--bad-fg:#a40e26;--na-bg:#eaeef2;--na-fg:#57606a;--warn-bg:#fff8c5;--warn-fg:#7d4e00}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#8d96a0;--card:#161b22;--line:#30363d;
+--ok-bg:#12261e;--ok-fg:#56d364;--bad-bg:#2d1214;--bad-fg:#ff7b72;--na-bg:#21262d;--na-fg:#8d96a0;--warn-bg:#3b2e00;--warn-fg:#e3b341}}
+*{box-sizing:border-box}
+body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:980px;margin:0 auto}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 12px}
+.counts{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.chip{padding:6px 12px;border-radius:999px;font-weight:600}
+.chip.bad{background:var(--bad-bg);color:var(--bad-fg)}
+.chip.ok{background:var(--ok-bg);color:var(--ok-fg)}
+.chip.na{background:var(--na-bg);color:var(--na-fg)}
+#stale{display:none;background:var(--warn-bg);color:var(--warn-fg);padding:10px 12px;border-radius:8px;margin:8px 0}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:640px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{background:var(--card);font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+td.tk{font-weight:700}
+td.muted{color:var(--muted)}
+td.why{white-space:normal;min-width:180px}
+tr.bad{box-shadow:inset 4px 0 0 var(--bad-fg);background:var(--bad-bg)}
+tr.ok{box-shadow:inset 4px 0 0 var(--ok-fg);background:rgba(46,160,67,.10)}
+tr.na{box-shadow:inset 4px 0 0 var(--line)}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-weight:700;font-size:13px}
+.pill.bad{background:var(--bad-fg);color:var(--bg)}
+.pill.ok{background:var(--ok-bg);color:var(--ok-fg)}
+.pill.na{background:var(--na-bg);color:var(--na-fg)}
+.legend{color:var(--muted);font-size:13px;margin-top:14px}
+.legend b{color:var(--fg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Opciones: estado ahora</h1>
+<p class="sub">Última foto: <b>%%UPDATED_ET%% ET</b> (%%UPDATED_ES%% España) · <span id="ago"></span><br>
+%%DAYS%% días de datos · %%SNAPS%% fotos guardadas · datos de Yahoo con unos 15 min de retraso</p>
+<div id="stale">La última foto tiene más de 45 minutos: puede que GitHub haya retrasado la ejecución o que el mercado esté cerrado.</div>
+<div class="counts">%%COUNTS%%</div>
+<div class="scroll"><table>
+<thead><tr><th>Ticker</th><th>Venc.</th><th>Estado</th><th>Strikes<br>ahora / normal</th><th>Spread $<br>ahora / normal</th><th>Normal histórico<br>strikes típ/máx · spread típ/máx</th><th>Motivo</th></tr></thead>
+<tbody>
+%%ROWS%%
+</tbody></table></div>
+<p class="legend"><b>OK</b> (verde): strikes y spread dentro de lo normal. <b>ESTRESADO</b> (rojo): tu contrato está al menos 2 strikes más lejos del ATM de lo típico y por encima del tope normal, o el spread es más ancho de lo normal. <b>Gris</b>: faltan datos o no suele haber contrato en tu rango. Strikes: 0 = ATM, 1 = el contiguo. Spread en $ por contrato. Normal = misma franja horaria.</p>
+</div>
+<script>
+(function(){
+  var t=new Date("%%ISO%%");
+  function upd(){
+    var m=Math.round((Date.now()-t.getTime())/60000);
+    var txt=m<1?"hace menos de 1 min":(m<90?"hace "+m+" min":"hace "+(Math.round(m/6)/10)+" h");
+    document.getElementById("ago").textContent=txt;
+    document.getElementById("stale").style.display=(m>45)?"block":"none";
+  }
+  upd(); setInterval(upd,30000);
+})();
+</script>
+</body>
+</html>
+"""
+
+
+def cmd_html(args):
+    """Genera una pagina HTML estatica con el estado de ahora (verde/rojo) y el baseline."""
+    from html import escape
+    out_path = args.out
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    if not os.path.exists(args.csv):
+        open(out_path, "w", encoding="utf-8").write(
+            "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<meta http-equiv='refresh' content='300'><title>Opciones</title>"
+            "<body style='font-family:sans-serif;padding:24px'><h1>Opciones: estado ahora</h1>"
+            "<p>Aun no hay datos guardados. La primera foto se guarda cuando el mercado esta abierto.</p></body>")
+        print(f"Sin datos todavia: pagina vacia en {out_path}")
+        return
+    df = load(args.csv, args.bucket_minutes)
+    latest = df["ts"].max()
+    cur = df[df["ts"] == latest]
+    base_df = df[df["ts"] < latest]                      # baseline sin la ultima foto
+    now = latest.to_pydatetime()
+    out = evaluate(cur.to_dict("records"), base_df, now, args)
+    st = status_rows(out)
+    order = _order_key(args)
+    st.sort(key=lambda r: (r["rank"], -r["ratio"] if r["rank"] == 0 else order.get(r["ticker"], 999), r["ticker"]))
+
+    # baseline por ticker/vencimiento (calls y puts juntos, solo filas con contrato en rango)
+    base_ir = base_df[base_df["in_range"]]
+    bl = {}
+    for (tk, dte), g in base_ir.groupby(["ticker", "dte_bucket"]):
+        bl[(tk, dte)] = (f"{fmt_n(g['tgt_dist_steps'].median())} / {fmt_n(g['tgt_dist_steps'].quantile(0.9))} · "
+                         f"{fmt(g['tgt_spread_ct'].median(), 1)} / {fmt(g['tgt_spread_ct'].quantile(0.9), 1)}")
+
+    def cell(a, b, nd=None):
+        if a is None or pd.isna(a):
+            return "-"
+        f = (lambda x: fmt(x, nd)) if nd else fmt_n
+        return f"{f(a)} / {f(b) if b is not None and not pd.isna(b) else '-'}"
+
+    rows_html = []
+    for r in st:
+        rows_html.append(
+            f'<tr class="{r["key"]}"><td class="tk">{escape(r["ticker"])}</td><td>{escape(r["venc"])}</td>'
+            f'<td><span class="pill {r["key"]}">{escape(r["text"])}</span></td>'
+            f'<td>{cell(r["strikes_now"], r["strikes_norm"])}</td>'
+            f'<td>{cell(r["spread_now"], r["spread_norm"], 1)}</td>'
+            f'<td class="muted">{escape(bl.get((r["ticker"], r["venc"]), "-"))}</td>'
+            f'<td class="why muted">{escape(str(r["motivo"]) if r["key"] != "ok" else "")}</td></tr>')
+    n_bad = sum(1 for r in st if r["key"] == "bad")
+    n_ok = sum(1 for r in st if r["key"] == "ok")
+    n_na = sum(1 for r in st if r["key"] == "na")
+    counts = (f'<span class="chip bad">{n_bad} estresados</span><span class="chip ok">{n_ok} OK</span>'
+              f'<span class="chip na">{n_na} sin datos suficientes</span>')
+
+    et_dt = latest.to_pydatetime().replace(tzinfo=ET)
+    page = (HTML_TEMPLATE
+            .replace("%%UPDATED_ET%%", et_dt.strftime("%d/%m/%Y %H:%M"))
+            .replace("%%UPDATED_ES%%", et_dt.astimezone(ZoneInfo("Europe/Madrid")).strftime("%H:%M"))
+            .replace("%%ISO%%", et_dt.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ"))
+            .replace("%%DAYS%%", str(base_df["ts"].dt.date.nunique()))
+            .replace("%%SNAPS%%", str(df["ts"].nunique()))
+            .replace("%%COUNTS%%", counts)
+            .replace("%%ROWS%%", "\n".join(rows_html)))
+    open(out_path, "w", encoding="utf-8").write(page)
+    print(f"Pagina generada: {out_path} | {n_bad} estresados, {n_ok} OK, {n_na} sin datos | foto {latest}")
 
 
 def cmd_collect(args, provider):
@@ -597,6 +759,12 @@ def main():
     k.add_argument("--save", action="store_true", help="guardar tambien esta foto")
     k.add_argument("--detalle", action="store_true", help="tabla completa con motivos")
 
+    w = sub.add_parser("html", help="genera una pagina HTML con el estado de la ultima foto")
+    common(w)
+    w.add_argument("--out", default="docs/index.html")
+    w.add_argument("--factor", type=num, default=2.0)
+    w.add_argument("--min-n", type=int, default=5)
+
     d = sub.add_parser("demo", help="prueba con datos simulados")
     common(d)
     d.add_argument("--by-time", action="store_true")
@@ -609,6 +777,8 @@ def main():
         return cmd_demo(args)
     if args.cmd == "report":                    # el informe solo lee el CSV: no necesita internet
         return cmd_report(args)
+    if args.cmd == "html":
+        return cmd_html(args)
     provider = MockProvider() if args.provider == "mock" else YahooProvider()
     if args.cmd == "collect":
         cmd_collect(args, provider)
