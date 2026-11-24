@@ -34,6 +34,7 @@ Formato de tickers.txt (uno por linea; el rango de prima por ticker es opcional)
 import argparse
 import math
 import os
+import re
 import sys
 import time
 from datetime import datetime, date, timedelta
@@ -67,8 +68,8 @@ def num(s):
     return float(str(s).replace(",", "."))
 
 
-def read_tickers(path, default_min, default_max):
-    """Lee tickers.txt. Devuelve lista de (symbol, prem_min, prem_max)."""
+def _read_tickers_raw(path):
+    """Lee tickers.txt. Devuelve [(symbol, prem_min|None, prem_max|None)]; None = sin rango propio."""
     out = []
     with open(path, encoding="utf-8-sig") as f:
         for raw in f:
@@ -77,17 +78,99 @@ def read_tickers(path, default_min, default_max):
                 continue
             parts = line.replace(";", " ").split()
             if len(parts) == 1 and "," in parts[0]:          # "SPY,QQQ,AAPL" en una linea
-                for s in parts[0].split(","):
-                    if s.strip():
-                        out.append((s.strip().upper(), default_min, default_max))
+                for s_ in parts[0].split(","):
+                    if s_.strip():
+                        out.append((s_.strip().upper(), None, None))
                 continue
             sym = parts[0].upper()
-            pmin = num(parts[1]) if len(parts) >= 3 else default_min
-            pmax = num(parts[2]) if len(parts) >= 3 else default_max
-            out.append((sym, pmin, pmax))
+            if len(parts) >= 3:
+                out.append((sym, num(parts[1]), num(parts[2])))
+            else:
+                out.append((sym, None, None))
     if not out:
         sys.exit(f"No encontre tickers en {path}")
     return out
+
+
+def read_tickers(path, default_min, default_max):
+    """Lee tickers.txt. Devuelve lista de (symbol, prem_min, prem_max) rellenando el rango por defecto."""
+    return [(s_, a if a is not None else default_min, b if b is not None else default_max)
+            for s_, a, b in _read_tickers_raw(path)]
+
+
+def _norm(txt):
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", txt) if unicodedata.category(c) != "Mn").upper().strip()
+
+
+def read_rp(path):
+    """Lee el Excel de la academia (rp.xls; en realidad es HTML). Fuente de verdad de los rangos.
+    Devuelve ({TICKER: (min, max, fecha|None)} en $ por ACCION, [avisos]). El Excel esta en $ por contrato (/100)."""
+    import html as _html
+    txt = open(path, encoding="utf-8-sig", errors="replace").read()
+    out, problems, header = {}, [], None
+    for tr in re.findall(r"<tr.*?</tr>", txt, re.S | re.I):
+        cells = [_html.unescape(re.sub(r"<.*?>", "", c)).strip() for c in re.findall(r"<t[hd].*?</t[hd]>", tr, re.S | re.I)]
+        if not cells:
+            continue
+        if header is None:
+            h = [_norm(c) for c in cells]
+            if "TICKER" in h and any("OPTIMO" in x for x in h):
+                header = {"t": h.index("TICKER"), "r": next(i for i, x in enumerate(h) if "OPTIMO" in x),
+                          "f": next((i for i, x in enumerate(h) if "FECHA" in x), None)}
+            continue
+        if len(cells) <= max(header["t"], header["r"]):
+            continue
+        tk = cells[header["t"]].strip().upper()
+        if not tk:
+            continue
+        nums = [float(x.replace(",", ".")) for x in re.findall(r"\d+(?:[.,]\d+)?", cells[header["r"]])]
+        if len(nums) != 2 or not (0 < nums[0] < nums[1]):
+            problems.append(f"{tk}: rango no valido en rp.xls ({cells[header['r']]!r})")
+            continue
+        fecha = None
+        if header["f"] is not None and header["f"] < len(cells):
+            m = re.search(r"\d{4}-\d{2}-\d{2}", cells[header["f"]])
+            fecha = m.group(0) if m else None
+        if tk in out:
+            problems.append(f"{tk}: aparece repetido en rp.xls (me quedo con la fecha mas reciente)")
+            if (fecha or "") < (out[tk][2] or ""):
+                continue
+        out[tk] = (nums[0] / 100.0, nums[1] / 100.0, fecha)
+    if header is None:
+        problems.append("rp.xls: no encuentro la cabecera (TICKER / RANGO OPTIMO); revisa el formato")
+    return out, problems
+
+
+def resolve_tickers(path, default_min, default_max, rp_path="rp.xls", verbose=True):
+    """Rango de cada ticker. Prioridad: 1) rango escrito en tickers.txt, 2) rp.xls (fuente de verdad),
+    3) rango por defecto SOLO si no existe rp.xls. Un ticker sin rango en rp.xls NO se vigila (queda en `missing`).
+    Devuelve (lista [(sym, min, max)], missing [sym], fechas {sym: 'AAAA-MM-DD'})."""
+    raw = _read_tickers_raw(path)
+    have_rp = bool(rp_path) and os.path.exists(rp_path)
+    rp, problems = read_rp(rp_path) if have_rp else ({}, [])
+    resolved, missing, dates = [], [], {}
+    for sym, a, b in raw:
+        if a is not None:
+            resolved.append((sym, a, b))
+        elif sym in rp:
+            lo, hi, f = rp[sym]
+            resolved.append((sym, lo, hi))
+            if f:
+                dates[sym] = f
+        elif have_rp:
+            missing.append(sym)
+        else:
+            resolved.append((sym, default_min, default_max))
+    if verbose:
+        if not have_rp:
+            print(f"AVISO: no encuentro {rp_path}; uso el rango por defecto ({fmt(default_min)}-{fmt(default_max)}) para todos.")
+        for p in problems:
+            print("AVISO:", p)
+        if missing:
+            print(f"AVISO: sin rango en {rp_path}, NO se vigilan: {', '.join(missing)} "
+                  "(anade una linea 'SIMBOLO min max' en tickers.txt o el ticker a rp.xls)")
+    return resolved, missing, dates
 
 
 def minutes_since_midnight(dtm):
@@ -105,11 +188,27 @@ def dte_bucket(dte):
     return "0DTE" if dte == 0 else ("1-7DTE" if dte <= 7 else "8+DTE")
 
 
+# Calendario NYSE/Nasdaq (fuente: NYSE, "Holidays & Trading Hours"). Completo hasta CALENDAR_LAST_YEAR;
+# de 2027 solo estan las fechas confirmadas. Cada ano hay que revisarlo.
+HOLIDAYS = {
+    date(2026, 1, 1), date(2026, 1, 19), date(2026, 2, 16), date(2026, 4, 3), date(2026, 5, 25),
+    date(2026, 6, 19), date(2026, 7, 3), date(2026, 9, 7), date(2026, 11, 26), date(2026, 12, 25),
+    date(2027, 1, 1), date(2027, 3, 26), date(2027, 11, 25), date(2027, 12, 24),
+}
+EARLY_CLOSE = {date(2026, 11, 27), date(2026, 12, 24), date(2027, 11, 26)}   # cierran a las 13:00 ET
+CALENDAR_LAST_YEAR = 2026
+
+
+def session_end(d):
+    """Minuto de cierre de la sesion de ese dia en ET (None = no hay sesion: fin de semana o festivo)."""
+    if d.weekday() >= 5 or d in HOLIDAYS:
+        return None
+    return 13 * 60 if d in EARLY_CLOSE else CLOSE_MIN
+
+
 def market_open(now):
-    if now.weekday() >= 5:
-        return False
-    m = minutes_since_midnight(now)
-    return OPEN_MIN <= m < CLOSE_MIN
+    end = session_end(now.date())
+    return end is not None and OPEN_MIN <= minutes_since_midnight(now) < end
 
 
 # Yahoo da las opciones con ~15 min de retraso: una foto antes de las 9:45 ET todavia muestra
@@ -118,10 +217,11 @@ DATA_START_MIN = 9 * 60 + 45
 
 
 def data_open(now):
-    if now.weekday() >= 5:
+    end = session_end(now.date())
+    if end is None:
         return False
-    m = minutes_since_midnight(now)
-    return DATA_START_MIN <= m < CLOSE_MIN
+    last = end if end >= CLOSE_MIN else end + 30      # media sesion: datos validos hasta ~13:30
+    return DATA_START_MIN <= minutes_since_midnight(now) < last
 
 
 # ----------------------------------------------------------------------------------------
@@ -336,6 +436,9 @@ def append_csv(path, rows):
     if not rows:
         return
     df = pd.DataFrame(rows)
+    if os.path.exists(path):
+        # nunca desalinear: se escribe EXACTAMENTE con las columnas de la cabecera existente
+        df = df.reindex(columns=list(pd.read_csv(path, nrows=0).columns))
     df.to_csv(path, mode="a", header=not os.path.exists(path), index=False)
 
 
@@ -351,7 +454,13 @@ def load(path, bucket_minutes):
     df["tgt_spread_ct"] = df["tgt_spread"] * 100          # $ por contrato
     df["atm_spread_ct"] = df["atm_spread"] * 100
     df["in_range"] = df["in_range"].astype(bool)
-    return df
+    # Si el rango de un ticker cambio (p. ej. se actualizo rp.xls), las fotos con el rango antiguo no son
+    # comparables: se ignoran (no se borran del CSV). Vale el rango de la ultima foto de cada ticker.
+    df["prem_min"] = df["prem_min"].round(2)
+    df["prem_max"] = df["prem_max"].round(2)
+    last = df.sort_values("ts").drop_duplicates("ticker", keep="last").set_index("ticker")
+    keep = (df["prem_min"] == df["ticker"].map(last["prem_min"])) & (df["prem_max"] == df["ticker"].map(last["prem_max"]))
+    return df[keep].copy()
 
 
 def show(df):
@@ -480,17 +589,29 @@ def simplify_check(out):
 def evaluate(rows, df, now, args):
     """Compara filas (foto actual) con el baseline guardado `df`. Devuelve una lista de registros."""
     tb = time_bucket(now, args.bucket_minutes)
+    min_days = getattr(args, "min_days", 3)
     out = []
     for r in rows:
         allb = df[(df["ticker"] == r["ticker"]) & (df["side"] == r["side"]) &
                   (df["dte_bucket"] == r["dte_bucket"])]
+        if "prem_min" in allb.columns and not pd.isna(r.get("prem_min", float("nan"))):
+            allb = allb[(allb["prem_min"].round(2) == round(float(r["prem_min"]), 2)) &
+                        (allb["prem_max"].round(2) == round(float(r["prem_max"]), 2))]
         base = allb[allb["in_range"]]
         sub = base[base["tbucket"] == tb]
         scope = f"franja {tb}"
         if len(sub) < args.min_n:
             sub, scope = base, "todo el dia"
         rec = {"ticker": r["ticker"], "lado": r["side"], "dte": r["dte_bucket"], "base": scope, "n": len(sub)}
+        # dias COMPLETOS anteriores con datos: con menos de min_days no se compara (todo gris)
+        days_prev = int(allb[allb["ts"].dt.date < now.date()]["ts"].dt.date.nunique()) if len(allb) else 0
+        few_days = days_prev < min_days
         if not bool(r["in_range"]):
+            if few_days:
+                rec.update({"estado": "sin baseline",
+                            "motivo": f"solo {days_prev} dia(s) previos de datos; hacen falta {min_days}"})
+                out.append(rec)
+                continue
             # ¿Es habitual no tener contrato en rango? Se compara con la MISMA franja horaria si hay datos
             # (cerca del cierre las primas se hunden y es normal que falten contratos en tu rango).
             ref = allb[allb["tbucket"] == tb]
@@ -510,6 +631,11 @@ def evaluate(rows, df, now, args):
             continue
         cur_k, cur_s = float(r["tgt_dist_steps"]), float(r["tgt_spread"]) * 100
         rec.update({"strikes_ahora": cur_k, "dist$_ahora": r["tgt_dist_usd"], "spread$ct_ahora": cur_s})
+        if few_days:
+            rec.update({"estado": "sin baseline",
+                        "motivo": f"solo {days_prev} dia(s) previos de datos; hacen falta {min_days}"})
+            out.append(rec)
+            continue
         if len(sub) < 3:
             rec.update({"estado": "sin baseline", "motivo": "faltan datos guardados"})
             out.append(rec)
@@ -531,7 +657,7 @@ def evaluate(rows, df, now, args):
 
 def cmd_check(args, provider):
     df = load(args.csv, args.bucket_minutes)
-    tickers = read_tickers(args.tickers, args.prem_min, args.prem_max)
+    tickers, _missing, _dates = resolve_tickers(args.tickers, args.prem_min, args.prem_max, args.rp)
     if args.only:
         wanted = {s.strip().upper() for s in args.only.split(",")}
         tickers = [t for t in tickers if t[0] in wanted]
@@ -566,7 +692,7 @@ HTML_TEMPLATE = """<!doctype html>
 --ok-bg:#12261e;--ok-fg:#56d364;--bad-bg:#2d1214;--bad-fg:#ff7b72;--na-bg:#21262d;--na-fg:#8d96a0;--warn-bg:#3b2e00;--warn-fg:#e3b341}}
 *{box-sizing:border-box}
 body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-.wrap{max-width:980px;margin:0 auto}
+.wrap{max-width:1240px;margin:0 auto}
 h1{font-size:20px;margin:0 0 4px}
 .sub{color:var(--muted);margin:0 0 12px}
 .counts{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
@@ -574,9 +700,10 @@ h1{font-size:20px;margin:0 0 4px}
 .chip.bad{background:var(--bad-bg);color:var(--bad-fg)}
 .chip.ok{background:var(--ok-bg);color:var(--ok-fg)}
 .chip.na{background:var(--na-bg);color:var(--na-fg)}
+.note{background:var(--na-bg);color:var(--na-fg);padding:10px 12px;border-radius:8px;margin:8px 0}
 #stale{display:none;background:var(--warn-bg);color:var(--warn-fg);padding:10px 12px;border-radius:8px;margin:8px 0}
 .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
-table{border-collapse:collapse;width:100%;min-width:640px}
+table{border-collapse:collapse;width:100%;min-width:760px}
 th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
 th{background:var(--card);font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
 tr:last-child td{border-bottom:0}
@@ -598,11 +725,12 @@ tr.na{box-shadow:inset 4px 0 0 var(--line)}
 <div class="wrap">
 <h1>Opciones: estado ahora</h1>
 <p class="sub">Última foto: <b>%%UPDATED_ET%% ET</b> (%%UPDATED_ES%% España) · <span id="ago"></span><br>
-%%DAYS%% días de datos · %%SNAPS%% fotos guardadas · datos de Yahoo con unos 15 min de retraso</p>
+%%DAYS%% día(s) de datos · %%SNAPS%% fotos guardadas · datos de Yahoo con unos 15 min de retraso</p>
 <div id="stale">La última foto tiene más de 45 minutos: puede que GitHub haya retrasado la ejecución o que el mercado esté cerrado.</div>
+%%NOTE%%
 <div class="counts">%%COUNTS%%</div>
 <div class="scroll"><table>
-<thead><tr><th>Ticker</th><th>Venc.</th><th>Estado</th><th>Strikes<br>ahora / normal</th><th>Spread $<br>ahora / normal</th><th>Normal histórico<br>strikes típ/máx · spread típ/máx</th><th>Motivo</th></tr></thead>
+<thead><tr><th>Ticker</th><th>Venc.</th><th>Estado</th><th>Strikes<br>ahora / normal</th><th>Spread $<br>ahora / normal</th><th>Normal histórico<br>strikes típ/máx · spread típ/máx</th><th>Rango usado<br>(edad en rp.xls)</th><th>Motivo</th></tr></thead>
 <tbody>
 %%ROWS%%
 </tbody></table></div>
@@ -661,6 +789,21 @@ def cmd_html(args):
         f = (lambda x: fmt(x, nd)) if nd else fmt_n
         return f"{f(a)} / {f(b) if b is not None and not pd.isna(b) else '-'}"
 
+    # rango usado por ticker (el de la ultima foto) y su edad segun rp.xls
+    _res, missing, rp_dates = resolve_tickers(args.tickers, args.prem_min, args.prem_max, args.rp, verbose=False)
+    rng_txt = {}
+    for _, rr in cur.drop_duplicates("ticker").iterrows():
+        t_ = f"{fmt(float(rr['prem_min']))}–{fmt(float(rr['prem_max']))}"
+        f_ = rp_dates.get(rr["ticker"])
+        if f_:
+            try:
+                t_ += f" · {(now.date() - date.fromisoformat(f_)).days} d"
+            except ValueError:
+                pass
+        else:
+            t_ += " · manual"
+        rng_txt[rr["ticker"]] = t_
+
     rows_html = []
     for r in st:
         rows_html.append(
@@ -669,7 +812,17 @@ def cmd_html(args):
             f'<td>{cell(r["strikes_now"], r["strikes_norm"])}</td>'
             f'<td>{cell(r["spread_now"], r["spread_norm"], 1)}</td>'
             f'<td class="muted">{escape(bl.get((r["ticker"], r["venc"]), "-"))}</td>'
+            f'<td class="muted">{escape(rng_txt.get(r["ticker"], "-"))}</td>'
             f'<td class="why muted">{escape(str(r["motivo"]) if r["key"] != "ok" else "")}</td></tr>')
+    min_days = getattr(args, "min_days", 3)
+    days_prev = int(base_df[base_df["ts"].dt.date < now.date()]["ts"].dt.date.nunique())
+    note = ""
+    if days_prev < min_days:
+        note = (f'<div class="note">Todavía no hay suficientes días para comparar: hacen falta {min_days} días anteriores '
+                f'y hay {days_prev}. Mientras tanto todo sale en gris, porque verdes y rojos no serían fiables.</div>')
+    if missing:
+        note += (f'<div class="note">Sin rango en rp.xls, no se vigilan: <b>{escape(", ".join(missing))}</b>. '
+                 'Añádelos a rp.xls o escribe su rango en tickers.txt.</div>')
     n_bad = sum(1 for r in st if r["key"] == "bad")
     n_ok = sum(1 for r in st if r["key"] == "ok")
     n_na = sum(1 for r in st if r["key"] == "na")
@@ -681,7 +834,8 @@ def cmd_html(args):
             .replace("%%UPDATED_ET%%", et_dt.strftime("%d/%m/%Y %H:%M"))
             .replace("%%UPDATED_ES%%", et_dt.astimezone(ZoneInfo("Europe/Madrid")).strftime("%H:%M"))
             .replace("%%ISO%%", et_dt.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ"))
-            .replace("%%DAYS%%", str(base_df["ts"].dt.date.nunique()))
+            .replace("%%DAYS%%", str(df["ts"].dt.date.nunique()))
+            .replace("%%NOTE%%", note)
             .replace("%%SNAPS%%", str(df["ts"].nunique()))
             .replace("%%COUNTS%%", counts)
             .replace("%%ROWS%%", "\n".join(rows_html)))
@@ -690,7 +844,7 @@ def cmd_html(args):
 
 
 def cmd_collect(args, provider):
-    tickers = read_tickers(args.tickers, args.prem_min, args.prem_max)
+    tickers, _missing, _dates = resolve_tickers(args.tickers, args.prem_min, args.prem_max, args.rp)
     while True:
         now = datetime.now(ET)
         if not data_open(now) and not args.force:
@@ -699,9 +853,11 @@ def cmd_collect(args, provider):
                 print(f"Todavia no hay datos fiables (Yahoo va con retraso). Espero {wait // 60} min hasta las 9:45 ET...")
                 time.sleep(wait)
                 continue
-            print(f"[{now.strftime('%H:%M')} ET] Fuera de horario de datos fiables (9:45-16:00 ET, lunes a viernes): no se guarda nada. "
-                  "Usa --force para guardar igualmente.")
+            print(f"[{now.strftime('%H:%M')} ET] Fuera de horario de datos fiables (9:45-16:00 ET en dias habiles; "
+                  "festivos y medias sesiones aparte): no se guarda nada. Usa --force para guardar igualmente.")
             return
+        if now.year > CALENDAR_LAST_YEAR:
+            print(f"AVISO: el calendario de festivos del script solo esta completo hasta {CALENDAR_LAST_YEAR}; revisalo.")
         print(f"[{now.strftime('%H:%M:%S')} ET] foto de {len(tickers)} tickers...")
         rows = snapshot(provider, tickers, now, pause=args.pause)
         append_csv(args.csv, rows)
@@ -731,7 +887,7 @@ def cmd_demo(args):
     print("=== DEMO (datos simulados) ===")
     cmd_report(args)
     # hoy: dia normal y dia con volatilidad implicita x2,5 y spreads x3
-    open("demo_tickers.txt", "w").write("SPY\nAAPL\nTSLA\n")
+    open("demo_tickers.txt", "w").write("SPY 0,30 0,60\nAAPL 0,30 0,60\nTSLA 0,30 0,60\n")   # rango explicito: ignora rp.xls
     args.tickers = "demo_tickers.txt"
     args.only, args.save = None, False
     for label, ivm, spm in (("HOY NORMAL", 1.0, 1.0), ("HOY ESTRESADO (IV x2,5, spread x3)", 2.5, 3.0)):
@@ -748,6 +904,7 @@ def main():
 
     def common(p):
         p.add_argument("--tickers", default="tickers.txt")
+        p.add_argument("--rp", default="rp.xls", help="Excel de rangos de la academia (fuente de verdad de los rangos)")
         p.add_argument("--csv", default="options_snapshots.csv")
         p.add_argument("--prem-min", type=num, default=0.30, help="prima minima de tu contrato (def 0,30)")
         p.add_argument("--prem-max", type=num, default=0.60, help="prima maxima de tu contrato (def 0,60)")
@@ -771,6 +928,7 @@ def main():
     k.add_argument("--only", help="solo estos tickers, ej. AAPL,TSLA")
     k.add_argument("--factor", type=num, default=2.0, help="ANORMAL si supera factor x mediana (def 2)")
     k.add_argument("--min-n", type=int, default=5, help="minimo de fotos para usar la misma franja")
+    k.add_argument("--min-days", type=int, default=3, help="dias previos de datos para empezar a comparar (def 3)")
     k.add_argument("--save", action="store_true", help="guardar tambien esta foto")
     k.add_argument("--detalle", action="store_true", help="tabla completa con motivos")
 
@@ -779,6 +937,7 @@ def main():
     w.add_argument("--out", default="docs/estado_opciones.html")
     w.add_argument("--factor", type=num, default=2.0)
     w.add_argument("--min-n", type=int, default=5)
+    w.add_argument("--min-days", type=int, default=3, help="dias previos de datos para empezar a comparar (def 3)")
 
     d = sub.add_parser("demo", help="prueba con datos simulados")
     common(d)
@@ -786,6 +945,7 @@ def main():
     d.add_argument("--detalle", action="store_true")
     d.add_argument("--factor", type=num, default=2.0)
     d.add_argument("--min-n", type=int, default=5)
+    d.add_argument("--min-days", type=int, default=3)
 
     args = ap.parse_args()
     if args.cmd == "demo":
