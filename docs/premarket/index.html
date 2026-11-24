@@ -5,57 +5,125 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Premarket Wall Street</title>
 <style>
-  :root { color-scheme: dark; --bg:#0d1117; --card:#161b22; --bd:#30363d; --fg:#e6edf3; --mut:#8b949e; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
-  .wrap { max-width:1100px; margin:0 auto; padding:16px; }
-  h1 { font-size:20px; margin:4px 0 2px; }
-  .meta { color:var(--mut); font-size:13px; margin:0 0 12px; }
-  .meta b { color:var(--fg); }
-  .term { background:var(--card); border:1px solid var(--bd); border-radius:8px; padding:12px 14px; margin:0;
-          overflow-x:auto; font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace; white-space:pre; }
-  .k{color:#6e7681}.r{color:#ff7b72}.g{color:#3fb950}.y{color:#e3b341}.b{color:#79c0ff}.m{color:#d2a8ff}
-  .c{color:#56d4dd}.w{color:#e6edf3}.gr{color:#8b949e}.B{font-weight:700}
-  footer { color:var(--mut); font-size:12px; margin:12px 0 4px; }
-  a { color:#79c0ff; }
+:root { color-scheme: light dark;
+  --bg:#f3f5f8; --card:#ffffff; --bd:#d8dee6; --fg:#1b2430; --mut:#5f6b7a;
+  --pos:#12803c; --neg:#c62828; --warn:#a15c00; --neu:#6b7280; --acc:#0b66c3;
+  --pos-bg:#e3f6ea; --neg-bg:#fde7e7; --warn-bg:#fff2d6; --neu-bg:#eceff3; --acc-bg:#e3effc; --term:#101418; }
+@media (prefers-color-scheme: dark) { :root {
+  --bg:#0d1117; --card:#161b22; --bd:#2d343d; --fg:#e6edf3; --mut:#8b949e;
+  --pos:#3fb950; --neg:#ff7b72; --warn:#e3b341; --neu:#9aa4af; --acc:#79c0ff;
+  --pos-bg:#12301d; --neg-bg:#3a1618; --warn-bg:#3a2c0d; --neu-bg:#21262d; --acc-bg:#10283f; --term:#0a0d12; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+.wrap { max-width:1180px; margin:0 auto; padding:16px; }
+header.top { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:flex-end; justify-content:space-between; margin-bottom:8px; }
+h1 { font-size:22px; margin:0; letter-spacing:-.01em; }
+.fecha { color:var(--mut); font-size:14px; }
+.estado { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:13px; color:var(--mut); }
+section { margin:22px 0; }
+h2 { font-size:15px; margin:0 0 8px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); font-weight:700; }
+.nota { color:var(--mut); font-size:12.5px; margin:8px 0 0; }
+.grid { display:grid; gap:10px; }
+.g4 { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+.cards { grid-template-columns:repeat(auto-fill,minmax(310px,1fr)); }
+.card { background:var(--card); border:1px solid var(--bd); border-radius:12px; padding:12px 14px; }
+.metric .lbl { font-size:12px; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
+.metric .big { font-size:28px; font-weight:750; line-height:1.15; margin:2px 0; font-variant-numeric:tabular-nums; }
+.metric .sub { font-size:12px; color:var(--mut); }
+.metric.pos { border-left:5px solid var(--pos); } .metric.neg { border-left:5px solid var(--neg); } .metric.neu,.metric.nd { border-left:5px solid var(--neu); }
+.metric.pos .big { color:var(--pos); } .metric.neg .big { color:var(--neg); }
+.chip { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap;
+        background:var(--neu-bg); color:var(--neu); }
+.chip.pos,.chip.verde { background:var(--pos-bg); color:var(--pos); } .chip.neg,.chip.rojo,.chip.r { background:var(--neg-bg); color:var(--neg); }
+.chip.y,.chip.amarillo,.chip.o,.chip.neu { background:var(--warn-bg); color:var(--warn); }
+.chip.b,.chip.c { background:var(--acc-bg); color:var(--acc); } .chip.m { background:#efe6fb; color:#7a3fc0; }
+@media (prefers-color-scheme: dark) { .chip.m { background:#2a1d40; color:#d2a8ff; } }
+.aviso { margin:8px 0 0; padding:8px 12px; border-radius:10px; font-size:13.5px; border:1px solid transparent; }
+.aviso.rojo { background:var(--neg-bg); color:var(--neg); } .aviso.amarillo { background:var(--warn-bg); color:var(--warn); }
+.noticias { list-style:none; margin:0; padding:0; display:grid; gap:8px; }
+.noticia { background:var(--card); border:1px solid var(--bd); border-radius:12px; padding:10px 14px; display:grid; grid-template-columns:150px 1fr; gap:10px; }
+.noticia .nt { display:flex; flex-direction:column; gap:4px; align-items:flex-start; }
+.hora { color:var(--mut); font-size:12.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.fuente { color:var(--mut); font-size:12.5px; }
+.etfs { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
+.etf { background:var(--card); border:1px solid var(--bd); border-radius:10px; padding:4px 12px; display:flex; gap:8px; align-items:baseline; }
+.etf .lbl { font-size:12px; color:var(--mut); font-weight:700; } .etf b { font-variant-numeric:tabular-nums; }
+.etf.pos b { color:var(--pos); } .etf.neg b { color:var(--neg); }
+.k { color:var(--mut); font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
+.emp header { display:flex; align-items:baseline; gap:8px; }
+.tk { font-size:20px; font-weight:800; } .nm { color:var(--mut); font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.noticia .tx { min-width:0; overflow-wrap:anywhere; }
+.meta2 { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:4px 0 10px; }
+.cap { margin-left:auto; color:var(--mut); font-size:12.5px; }
+.duo { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.box { border-radius:10px; padding:8px 10px; border:1px solid var(--bd); background:var(--neu-bg); display:flex; flex-direction:column; gap:1px; min-width:0; }
+.box b { font-size:15.5px; font-variant-numeric:tabular-nums; } .box small { color:var(--mut); font-size:12px; }
+.box.pos { background:var(--pos-bg); border-color:var(--pos); } .box.pos b { color:var(--pos); }
+.box.neg { background:var(--neg-bg); border-color:var(--neg); } .box.neg b { color:var(--neg); }
+.box.neu { background:var(--warn-bg); border-color:var(--warn); }
+.rel { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:10px; }
+.tabla { background:var(--card); border:1px solid var(--bd); border-radius:12px; overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:14px; }
+th,td { padding:7px 12px; text-align:left; vertical-align:top; border-bottom:1px solid var(--bd); }
+thead th { color:var(--mut); font-size:12px; text-transform:uppercase; letter-spacing:.05em; background:var(--neu-bg); }
+tr.dia th { background:var(--acc-bg); color:var(--acc); font-size:12.5px; text-transform:none; letter-spacing:0; }
+td.n,th.n { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+tr.rojo td { background:var(--neg-bg); } tr.amarillo td { background:var(--warn-bg); } tr.hoy td { background:var(--warn-bg); }
+tbody tr:last-child td { border-bottom:0; }
+.vacio { color:var(--mut); margin:6px 0; } .vacio.rojo { color:var(--neg); } .vacio.amarillo { color:var(--warn); }
+details { margin-top:22px; } summary { cursor:pointer; color:var(--mut); font-size:13px; }
+.term { background:var(--term); color:#e6edf3; border-radius:10px; padding:12px 14px; margin:8px 0 0; overflow-x:auto;
+        font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace; white-space:pre; }
+.term .k{color:#6e7681}.term .r{color:#ff7b72}.term .g{color:#3fb950}.term .y{color:#e3b341}.term .b{color:#79c0ff}.term .m{color:#d2a8ff}
+.term .c{color:#56d4dd}.term .w{color:#e6edf3}.term .gr{color:#8b949e}.term .B{font-weight:700}
+footer { color:var(--mut); font-size:12px; margin:22px 0 4px; }
+@media (max-width:640px) { .noticia { grid-template-columns:1fr; } .duo { grid-template-columns:1fr; } .metric .big { font-size:24px; } }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Wall Street hoy · Premarket</h1>
-  <p class="meta">Última actualización: <b>mar 24 nov 2026 · 05:54 ET (10:54 UTC)</b> · franja manual · <span id="hace" data-iso="2026-11-24T10:54:13.922264+00:00"></span></p>
-<pre class="term"><span class="c">==================================================================================</span>
-<span class="B">  WALL STREET HOY — PREMARKET  martes 24 de noviembre de 2026 · 05:54 ET</span>
+  <header class="top">
+    <div><h1>Wall Street hoy · Premarket</h1><div class="fecha">martes 24 de noviembre de 2026</div></div>
+    <div class="estado"><span class="chip c">franja manual</span><span>Actualizado 06:07 ET (11:07 UTC)</span><span id="hace" data-iso="2026-11-24T11:07:17.716790+00:00"></span></div>
+  </header>
+<section><h2>Futuros</h2><div class="grid g4"><div class="card metric neg"><div class="lbl">DOW</div><div class="big">−0,39 %</div><div class="sub">dato de las 05:57 ET</div></div><div class="card metric neg"><div class="lbl">S&amp;P 500</div><div class="big">−0,80 %</div><div class="sub">dato de las 05:57 ET</div></div><div class="card metric neg"><div class="lbl">NASDAQ 100</div><div class="big">−1,65 %</div><div class="sub">dato de las 05:57 ET</div></div><div class="card metric neg"><div class="lbl">RUSSELL 2000</div><div class="big">−0,43 %</div><div class="sub">dato de las 05:57 ET</div></div></div><p class="nota">Variación vs liquidación del día anterior · futuros CME vía Yahoo · retraso ≈10 min</p><div class="aviso rojo">⚠ <b>jue 26 nov</b>: MERCADO CERRADO (Acción de Gracias)</div><div class="aviso amarillo">⚠ <b>vie 27 nov</b>: cierre anticipado 13:00 ET (día después de Acción de Gracias)</div></section>
+<section><h2>Noticias que mueven la apertura</h2><p class="nota">Desde el cierre de ayer · las más recientes primero</p><ul class="noticias"><li class="noticia"><div class="nt"><span class="hora">mar 06:02 ET</span><span class="chip m">FED</span></div><div class="tx">Wall Street se enfrenta a una batalla de bonos de 70 000 millones de dólares y a una prueba de confianza del consumidor antes de los datos de inflación de la Fed<span class="fuente"> — TipRanks</span></div></li><li class="noticia"><div class="nt"><span class="hora">mar 06:01 ET</span><span class="chip c">EMPRESA</span></div><div class="tx">Alphabet (GOOG) registra 310,5 millones de dólares en compras netas de ETF el 20 de noviembre<span class="fuente"> — GuruFocus.com</span></div></li><li class="noticia"><div class="nt"><span class="hora">mar 05:25 ET</span><span class="chip c">EMPRESA</span></div><div class="tx">Preapertura: Los futuros estadounidenses y las bolsas europeas caen a medida que se enfría la subida de Nvidia<span class="fuente"> — The Globe and Mail</span></div></li><li class="noticia"><div class="nt"><span class="hora">mar 05:18 ET</span><span class="chip o">POLÍTICA</span></div><div class="tx">Bolsa hoy: los futuros del Dow y del S&amp;P 500 caen tras el anuncio de Scott Bessent de nuevas sanciones a Irán y la guerra del Ormuz<span class="fuente"> — Benzinga</span></div></li><li class="noticia"><div class="nt"><span class="hora">lun 17:25 ET</span><span class="chip b">MACRO</span></div><div class="tx">Wall Street se dispara con el regreso de Huang a Nvidia, y los rendimientos del Tesoro suben<span class="fuente"> — Yahoo Finance</span></div></li></ul></section>
+<section><h2>Earnings de ayer (AC) y hoy (BO) — las grandes</h2><div class="etfs"><span class="k">ETF de referencia</span><div class="etf neg"><span class="lbl">SPY</span><b>−0,8 %</b></div><div class="etf neg"><span class="lbl">QQQ</span><b>−1,7 %</b></div><div class="etf neg"><span class="lbl">IWM</span><b>−0,5 %</b></div><div class="etf neg"><span class="lbl">SOXL</span><b>−12,5 %</b></div><div class="etf neg"><span class="lbl">DIA</span><b>−0,4 %</b></div></div><div class="grid cards"><article class="card emp"><header><span class="tk">CRWD</span><span class="nm">CrowdStrike</span></header><div class="meta2"><span class="chip y">ayer n/d</span><span class="chip n" title="Entra por capitalización">★ top 10</span><span class="cap">234,9 mil M$</span></div><div class="duo"><div class="box pos"><span class="k">Resultado</span><b>EPS 0,05 vs 0,00</b><small>consenso 0 ~</small></div><div class="box pos"><span class="k">Reacción</span><b>+0,1 %</b><small>premarket 06:07</small></div></div><div class="rel"><span class="k">pesa en</span><span class="chip neg">QQQ −1,7 %</span></div></article><article class="card emp"><header><span class="tk">ADI</span><span class="nm">Analog Devices</span></header><div class="meta2"><span class="chip y">BO hoy</span><span class="cap">167,6 mil M$</span></div><div class="duo"><div class="box nd"><span class="k">Resultado</span><b>pendiente</b><small>sin dato aún</small></div><div class="box neg"><span class="k">Reacción</span><b>−2,0 %</b><small>premarket 05:30</small></div></div><div class="rel"><span class="k">pesa en</span><span class="chip neg">SOXL −12,5 %</span><span class="chip neg">QQQ −1,7 %</span><span class="chip neg">SPY −0,8 %</span></div></article><article class="card emp"><header><span class="tk">MDT</span><span class="nm">Medtronic</span></header><div class="meta2"><span class="chip y">BO hoy</span><span class="chip n" title="Entra por capitalización">★ top 10</span><span class="cap">127,8 mil M$</span></div><div class="duo"><div class="box nd"><span class="k">Resultado</span><b>pendiente</b><small>sin dato aún</small></div><div class="box pos"><span class="k">Reacción</span><b>+0,9 %</b><small>premarket 05:37</small></div></div></article><article class="card emp"><header><span class="tk">HPE</span><span class="nm">Hewlett Packard Enterprise</span></header><div class="meta2"><span class="chip y">AC ayer</span><span class="chip n" title="Entra por capitalización">★ top 10</span><span class="cap">54,3 mil M$</span></div><div class="duo"><div class="box neg"><span class="k">Resultado</span><b>EPS 0,54 vs 1,18</b><small>−54 % vs consenso ~</small></div><div class="box neg"><span class="k">Reacción</span><b>−11,6 %</b><small>premarket 06:06</small></div></div></article><article class="card emp"><header><span class="tk">A</span><span class="nm">Agilent</span></header><div class="meta2"><span class="chip y">AC ayer</span><span class="chip n" title="Entra por capitalización">★ top 10</span><span class="cap">48,0 mil M$</span></div><div class="duo"><div class="box neg"><span class="k">Resultado</span><b>EPS 1,59 vs 1,72</b><small>−8 % vs consenso ~</small></div><div class="box pos"><span class="k">Reacción</span><b>+6,5 %</b><small>premarket 04:12</small></div></div></article><article class="card emp"><header><span class="tk">ZS</span><span class="nm">Zscaler</span></header><div class="meta2"><span class="chip y">ayer n/d</span><span class="chip n" title="Entra por capitalización">★ top 10</span><span class="cap">31,8 mil M$</span></div><div class="duo"><div class="box neg"><span class="k">Resultado</span><b>EPS -0,03 vs 0,12</b><small>−125 % vs consenso ~</small></div><div class="box neg"><span class="k">Reacción</span><b>−0,8 %</b><small>premarket 05:10</small></div></div></article><article class="card emp"><header><span class="tk">DLTR</span><span class="nm">Dollar Tree</span></header><div class="meta2"><span class="chip y">BO hoy</span><span class="chip n" title="Entra por capitalización">★ top 10</span><span class="cap">25,9 mil M$</span></div><div class="duo"><div class="box nd"><span class="k">Resultado</span><b>pendiente</b><small>sin dato aún</small></div><div class="box neg"><span class="k">Reacción</span><b>−1,6 %</b><small>premarket 06:05</small></div></div></article><article class="card emp"><header><span class="tk">TCOM</span><span class="nm">Trip.com</span></header><div class="meta2"><span class="chip y">ayer n/d</span><span class="chip n" title="Entra por capitalización">★ top 10</span><span class="cap">25,5 mil M$</span></div><div class="duo"><div class="box pos"><span class="k">Resultado</span><b>EPS 3,76 vs 1,07</b><small>+251 % vs consenso ~</small></div><div class="box neg"><span class="k">Reacción</span><b>−1,1 %</b><small>premarket 04:40</small></div></div></article><article class="card emp"><header><span class="tk">ZM</span><span class="nm">Zoom</span></header><div class="meta2"><span class="chip y">AC ayer</span><span class="chip n" title="Entra por capitalización">★ top 10</span><span class="cap">23,7 mil M$</span></div><div class="duo"><div class="box neg"><span class="k">Resultado</span><b>EPS 0,89 vs 1,00</b><small>−11 % vs consenso ~</small></div><div class="box neg"><span class="k">Reacción</span><b>−1,2 %</b><small>premarket 06:06</small></div></div></article><article class="card emp"><header><span class="tk">BBY</span><span class="nm">Best Buy</span></header><div class="meta2"><span class="chip y">BO hoy</span><span class="chip n" title="Entra por capitalización">★ top 10</span><span class="cap">20,5 mil M$</span></div><div class="duo"><div class="box nd"><span class="k">Resultado</span><b>pendiente</b><small>sin dato aún</small></div><div class="box pos"><span class="k">Reacción</span><b>+1,3 %</b><small>premarket 05:16</small></div></div></article></div><p class="nota">Resultado: EPS frente al consenso (verde = mejor, rojo = peor). Reacción: precio ahora frente al cierre de ayer. «~» = cifra del calendario del Nasdaq: puede mezclar EPS GAAP y ajustado; contrástala con la nota de la empresa.</p></section>
+<section><h2>Agenda USA — alto impacto ★★★ · próximos 7 días (ET)</h2><div class="tabla"><table><thead><tr><th>Hora</th><th>Evento</th><th class="n">Actual</th><th class="n">Cons.</th><th class="n">Ant.</th></tr></thead><tbody><tr class="dia"><th colspan="5">mar 24 nov</th></tr><tr class="rojo"><td class="hora">10:00 AM</td><td>Confianza del consumidor de The Conference Board  (Nov) <span class="chip rojo">NO NORMAL +30m</span></td><td class="n"></td><td class="n">92,4</td><td class="n">91,7</td></tr><tr class="dia"><th colspan="5">mié 25 nov</th></tr><tr class=""><td class="hora">8:30 AM</td><td>Nuevas peticiones de subsidio por desempleo</td><td class="n"></td><td class="n">201K</td><td class="n">203K</td></tr><tr class=""><td class="hora">8:30 AM</td><td>PIB (Trimestral)  (3T)</td><td class="n"></td><td class="n">3,4%</td><td class="n">2,2%</td></tr><tr class=""><td class="hora">8:30 AM</td><td>Precios del gasto en consumo personal subyacente (Anual)  (Oct)</td><td class="n"></td><td class="n">3,2%</td><td class="n">3,1%</td></tr><tr class=""><td class="hora">8:30 AM</td><td>Precios del gasto en consumo personal subyacente (Mensual)  (Oct)</td><td class="n"></td><td class="n">0,3%</td><td class="n">0,3%</td></tr><tr class=""><td class="hora">10:00 AM</td><td>Ventas de viviendas nuevas  (Oct)</td><td class="n"></td><td class="n">650K</td><td class="n">676K</td></tr><tr class=""><td class="hora">10:30 AM</td><td>Inventarios de petróleo crudo de la AIE</td><td class="n"></td><td class="n"></td><td class="n">3,380M</td></tr></tbody></table></div></section>
+<section><h2>Earnings — próximos 7 días · las grandes + top 10 por capitalización</h2><div class="tabla"><table><thead><tr><th>Hora</th><th>Ticker</th><th>Empresa</th><th class="n">Capitalización</th></tr></thead><tbody><tr class="dia"><th colspan="4">mar 24 nov</th></tr><tr><td class="hora">BO</td><td><b>ADI</b></td><td>Analog Devices</td><td class="n">167,6 mil M$</td></tr><tr><td class="hora">BO</td><td><b>MDT</b></td><td>Medtronic <span class="chip n">★ top 10</span></td><td class="n">127,8 mil M$</td></tr><tr><td class="hora">BO</td><td><b>DLTR</b></td><td>Dollar Tree <span class="chip n">★ top 10</span></td><td class="n">25,9 mil M$</td></tr><tr><td class="hora">AC</td><td><b>DELL</b></td><td>Dell <span class="chip n">★ top 10</span></td><td class="n">176,8 mil M$</td></tr><tr><td class="hora">AC</td><td><b>ADSK</b></td><td>Autodesk <span class="chip n">★ top 10</span></td><td class="n">51,1 mil M$</td></tr><tr><td class="hora">AC</td><td><b>WDAY</b></td><td>Workday <span class="chip n">★ top 10</span></td><td class="n">42,1 mil M$</td></tr><tr><td class="hora">AC</td><td><b>HPQ</b></td><td>HP <span class="chip n">★ top 10</span></td><td class="n">25,2 mil M$</td></tr><tr><td class="hora">n/d</td><td><b>BHP</b></td><td>BHP <span class="chip n">★ top 10</span></td><td class="n">173,6 mil M$</td></tr><tr class="dia"><th colspan="4">mié 25 nov</th></tr><tr><td class="hora">BO</td><td><b>DE</b></td><td>Deere <span class="chip n">★ top 10</span></td><td class="n">164,3 mil M$</td></tr><tr class="dia"><th colspan="4">lun 30 nov</th></tr><tr><td class="hora">AC</td><td><b>RBRK</b></td><td>Rubrik <span class="chip n">★ top 10</span></td><td class="n">22,1 mil M$</td></tr></tbody></table></div><p class="nota">BO: antes de abrir · AC: tras el cierre · n/d: hora no confirmada. Sin earnings en la ventana: AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA.</p></section>
+<section><h2>Próximos splits — 30 días</h2><div class="tabla"><table><thead><tr><th>Fecha</th><th>Ticker</th><th>Tipo</th><th>Ratio</th><th>Empresa</th></tr></thead><tbody><tr class="hoy"><td class="hora">HOY</td><td><b>CCTG</b></td><td><span class="chip neg">inverso</span></td><td>1:20</td><td>CCSC Technology International Holdings Limited</td></tr><tr class="hoy"><td class="hora">HOY</td><td><b>CODX</b></td><td><span class="chip neg">inverso</span></td><td>1:25</td><td>Co-Diagnostics, Inc.</td></tr><tr class="hoy"><td class="hora">HOY</td><td><b>GFAI</b></td><td><span class="chip neg">inverso</span></td><td>1:40</td><td>Guardforce AI Co., Limited</td></tr><tr class="hoy"><td class="hora">HOY</td><td><b>ISPC</b></td><td><span class="chip neg">inverso</span></td><td>1:6</td><td>iSpecimen Inc.</td></tr><tr class="hoy"><td class="hora">HOY</td><td><b>JAGX</b></td><td><span class="chip neg">inverso</span></td><td>1:25</td><td>Jaguar Health, Inc.</td></tr><tr class="hoy"><td class="hora">HOY</td><td><b>RBNE</b></td><td><span class="chip neg">inverso</span></td><td>1:75</td><td>Robin Energy Ltd.</td></tr><tr class=""><td class="hora">mar 1 dic</td><td><b>CBSH</b></td><td><span class="chip n">div. acciones</span></td><td>5%</td><td>Commerce Bancshares, Inc.</td></tr><tr class=""><td class="hora">mié 2 dic</td><td><b>LARK</b></td><td><span class="chip n">div. acciones</span></td><td>5%</td><td>Landmark Bancorp Inc.</td></tr><tr class=""><td class="hora">lun 7 dic</td><td><b>MYND</b></td><td><span class="chip neg">inverso</span></td><td>2 : 15</td><td>Mynd.ai, Inc.</td></tr><tr class=""><td class="hora">lun 7 dic</td><td><b>SITM</b></td><td><span class="chip pos">directo</span></td><td>3:1</td><td>SiTime Corporation</td></tr></tbody></table></div><p class="nota">+ 10 ETF apalancados (Leverage Shares/Themes) con split inverso el mié 9 dic: AAOG, AEHG, ASTG, AXTL, CBRG, CIEG, COHH, FOMG…</p><p class="nota">Ratio A : B = A acciones nuevas por B antiguas (1 : 10 = inverso, 3 : 1 = directo). Fuente: Nasdaq.</p></section>
+  <details><summary>Ver versión texto (la misma salida que la terminal)</summary><pre class="term"><span class="c">==================================================================================</span>
+<span class="B">  WALL STREET HOY — PREMARKET  martes 24 de noviembre de 2026 · 06:07 ET</span>
 <span class="c">==================================================================================</span>
 
 <span class="y B">FUTUROS CME (Yahoo · retraso habitual ≈10 min)</span>
-  DOW: <span class="r">-0,29%</span>   S&amp;P 500: <span class="r">-0,68%</span>   NASDAQ 100: <span class="r">-1,52%</span>   RUSSELL 2000: <span class="r">-0,32%</span>
-  <span class="gr">Variación vs liquidación del día anterior · último dato (hora ET): DOW 05:44  S&amp;P 500 05:44  NASDAQ 100 05:44  RUSSELL 2000 05:44 · edad del dato ≈10 min</span>
+  DOW: <span class="r">-0,39%</span>   S&amp;P 500: <span class="r">-0,80%</span>   NASDAQ 100: <span class="r">-1,65%</span>   RUSSELL 2000: <span class="r">-0,43%</span>
+  <span class="gr">Variación vs liquidación del día anterior · último dato (hora ET): DOW 05:57  S&amp;P 500 05:57  NASDAQ 100 05:57  RUSSELL 2000 05:57 · edad del dato ≈10 min</span>
   <span class="r B">⚠ jue 26 nov: MERCADO CERRADO (Acción de Gracias)</span>
   <span class="y B">⚠ vie 27 nov: cierre anticipado 13:00 ET (día después de Acción de Gracias)</span>
 
 <span class="c">01</span>  <span class="y B">NOTICIAS QUE MUEVEN LA APERTURA (desde el cierre de ayer · las más recientes primero)</span>
-  <span class="gr">mar 05:25 ET</span> <span class="c">[EMPRESA  ]</span> Preapertura: Los futuros estadounidenses suben ligeramente tras el repunte impulsado por Nvidia <span class="gr">(The Globe and Mail)</span>
+  <span class="gr">mar 06:02 ET</span> <span class="c">[FED      ]</span> Wall Street se enfrenta a una batalla de bonos de 70 000 millones de dólares y a una prueba de … <span class="gr">(TipRanks)</span>
+  <span class="gr">mar 06:01 ET</span> <span class="c">[EMPRESA  ]</span> Alphabet (GOOG) registra 310,5 millones de dólares en compras netas de ETF el 20 de noviembre <span class="gr">(GuruFocus.com)</span>
+  <span class="gr">mar 05:25 ET</span> <span class="c">[EMPRESA  ]</span> Preapertura: Los futuros estadounidenses y las bolsas europeas caen a medida que se enfría la s… <span class="gr">(The Globe and Mail)</span>
   <span class="gr">mar 05:18 ET</span> <span class="c">[POLÍTICA ]</span> Bolsa hoy: los futuros del Dow y del S&amp;P 500 caen tras el anuncio de Scott Bessent de nuevas sa… <span class="gr">(Benzinga)</span>
-  <span class="gr">mar 04:50 ET</span> <span class="y">[EARNINGS ]</span> CVS ha superado las estimaciones de beneficios durante 6 trimestres consecutivos. ¿Por qué coti… <span class="gr">(The Globe and Mail)</span>
-  <span class="gr">mar 00:06 ET</span> <span class="c">[FED      ]</span> Las matemáticas de la inflación, actualizadas: la Reserva Federal está luchando contra el petró… <span class="gr">(Trefis)</span>
   <span class="gr">lun 17:25 ET</span> <span class="c">[MACRO    ]</span> Wall Street se dispara con el regreso de Huang a Nvidia, y los rendimientos del Tesoro suben <span class="gr">(Yahoo Finance)</span>
 
 <span class="c">02</span>  <span class="y B">EARNINGS DE AYER (AC) / HOY (BO) — LAS GRANDES</span>
   <span class="gr">■ resultado: EPS vs consenso (verde = mejor, rojo = peor)   ■ reacción: precio ahora vs cierre de ayer</span>
-  <span class="B">ETF de referencia</span> <span class="gr">(ahora vs cierre de ayer)</span>: SPY <span class="r">-1,0 %</span>  ·  QQQ <span class="r">-1,8 %</span>  ·  IWM <span class="r">-0,6 %</span>  ·  SOXL <span class="r">-13,0 %</span>  ·  DIA <span class="r">-0,5 %</span>
+  <span class="B">ETF de referencia</span> <span class="gr">(ahora vs cierre de ayer)</span>: SPY <span class="r">-0,8 %</span>  ·  QQQ <span class="r">-1,7 %</span>  ·  IWM <span class="r">-0,5 %</span>  ·  SOXL <span class="r">-12,5 %</span>  ·  DIA <span class="r">-0,4 %</span>
   <span class="B">TICKER EMPRESA                   REPORTA     CAP.  RESULTADO                           REACCIÓN</span>
-  <span class="B">CRWD   </span>CrowdStrike               ayer n/d   234,9  <span class="g">■</span> EPS 0,05 vs 0,00~                   <span class="r">■</span> -0,3 % <span class="gr">premarket 05:54</span> <span class="gr">★top10</span>
-  <span class="gr">       ↔ pesa en:</span> QQQ <span class="r">-1,8 %</span>
-  <span class="B">ADI    </span>Analog Devices            BO hoy     167,6  <span class="gr">■</span> <span class="gr">pendiente / sin dato              </span>  <span class="r">■</span> -2,2 % <span class="gr">premarket 05:05</span>
-  <span class="gr">       ↔ pesa en:</span> SOXL <span class="r">-13,0 %</span>  ·  QQQ <span class="r">-1,8 %</span>  ·  SPY <span class="r">-1,0 %</span>
+  <span class="B">CRWD   </span>CrowdStrike               ayer n/d   234,9  <span class="g">■</span> EPS 0,05 vs 0,00~                   <span class="g">■</span> +0,1 % <span class="gr">premarket 06:07</span> <span class="gr">★top10</span>
+  <span class="gr">       ↔ pesa en:</span> QQQ <span class="r">-1,7 %</span>
+  <span class="B">ADI    </span>Analog Devices            BO hoy     167,6  <span class="gr">■</span> <span class="gr">pendiente / sin dato              </span>  <span class="r">■</span> -2,0 % <span class="gr">premarket 05:30</span>
+  <span class="gr">       ↔ pesa en:</span> SOXL <span class="r">-12,5 %</span>  ·  QQQ <span class="r">-1,7 %</span>  ·  SPY <span class="r">-0,8 %</span>
   <span class="B">MDT    </span>Medtronic                 BO hoy     127,8  <span class="gr">■</span> <span class="gr">pendiente / sin dato              </span>  <span class="g">■</span> +0,9 % <span class="gr">premarket 05:37</span> <span class="gr">★top10</span>
-  <span class="B">HPE    </span>Hewlett Packard Enterpr…  AC ayer     54,3  <span class="r">■</span> EPS 0,54 vs 1,18 (-54 %)~           <span class="r">■</span> -12,1 % <span class="gr">premarket 05:51</span> <span class="gr">★top10</span>
+  <span class="B">HPE    </span>Hewlett Packard Enterpr…  AC ayer     54,3  <span class="r">■</span> EPS 0,54 vs 1,18 (-54 %)~           <span class="r">■</span> -11,6 % <span class="gr">premarket 06:06</span> <span class="gr">★top10</span>
   <span class="B">A      </span>Agilent                   AC ayer     48,0  <span class="r">■</span> EPS 1,59 vs 1,72 (-8 %)~            <span class="g">■</span> +6,5 % <span class="gr">premarket 04:12</span> <span class="gr">★top10</span>
   <span class="B">ZS     </span>Zscaler                   ayer n/d    31,8  <span class="r">■</span> EPS -0,03 vs 0,12 (-125 %)~         <span class="r">■</span> -0,8 % <span class="gr">premarket 05:10</span> <span class="gr">★top10</span>
-  <span class="B">DLTR   </span>Dollar Tree               BO hoy      25,9  <span class="gr">■</span> <span class="gr">pendiente / sin dato              </span>  <span class="r">■</span> -3,1 % <span class="gr">premarket 05:47</span> <span class="gr">★top10</span>
+  <span class="B">DLTR   </span>Dollar Tree               BO hoy      25,9  <span class="gr">■</span> <span class="gr">pendiente / sin dato              </span>  <span class="r">■</span> -1,6 % <span class="gr">premarket 06:05</span> <span class="gr">★top10</span>
   <span class="B">TCOM   </span>Trip.com                  ayer n/d    25,5  <span class="g">■</span> EPS 3,76 vs 1,07 (+251 %)~          <span class="r">■</span> -1,1 % <span class="gr">premarket 04:40</span> <span class="gr">★top10</span>
-  <span class="B">ZM     </span>Zoom                      AC ayer     23,7  <span class="r">■</span> EPS 0,89 vs 1,00 (-11 %)~           <span class="r">■</span> -0,8 % <span class="gr">premarket 05:50</span> <span class="gr">★top10</span>
+  <span class="B">ZM     </span>Zoom                      AC ayer     23,7  <span class="r">■</span> EPS 0,89 vs 1,00 (-11 %)~           <span class="r">■</span> -1,2 % <span class="gr">premarket 06:06</span> <span class="gr">★top10</span>
   <span class="B">BBY    </span>Best Buy                  BO hoy      20,5  <span class="gr">■</span> <span class="gr">pendiente / sin dato              </span>  <span class="g">■</span> +1,3 % <span class="gr">premarket 05:16</span> <span class="gr">★top10</span>
   <span class="gr">CAP. en miles de millones de $ · ★top10 = entra por capitalización, no está en tu lista de GRANDES.</span>
   <span class="gr">~ = cifra del calendario del Nasdaq (puede mezclar EPS GAAP y ajustado): contrasta con la nota de la empresa antes de fiarte.</span>
@@ -103,9 +171,9 @@
   <span class="gr">+ 10 ETF apalancados (Leverage Shares/Themes) con split inverso el mié 9 dic: AAOG, AEHG, ASTG, AXTL, CBRG, CIEG, COHH, FOMG…</span>
   <span class="gr">Ratio A : B = A acciones nuevas por B antiguas (1 : 10 = inverso, 3 : 1 = directo). Fuente: Nasdaq.</span>
 
-<span class="gr">BO: before open | AC: after close. Fuentes: Yahoo Finance (futuros, precios), Nasdaq (earnings, splits), Google News, Investing.com y Federal Reserve.</span></pre>
+<span class="gr">BO: before open | AC: after close. Fuentes: Yahoo Finance (futuros, precios), Nasdaq (earnings, splits), Google News, Investing.com y Federal Reserve.</span></pre></details>
   <footer>Se actualiza 3 veces por día de mercado (8:00, 8:30 y 9:15 hora de Nueva York; la bolsa abre a las 9:30).
-  Datos con retraso: no es una recomendación de inversión. · <a href="../">← volver a la página principal</a></footer>
+  Fuentes: Yahoo Finance (futuros y precios, con retraso), Nasdaq (earnings y splits), Google News, Investing.com. No es una recomendación de inversión.</footer>
 </div>
 <script>
   (function () {
@@ -113,7 +181,7 @@
     var t = Date.parse(el.dataset.iso); if (isNaN(t)) return;
     function pinta() {
       var min = Math.max(0, Math.round((Date.now() - t) / 60000));
-      el.textContent = min < 60 ? "hace " + min + " min" : "hace " + Math.floor(min / 60) + " h " + (min % 60) + " min";
+      el.textContent = "· " + (min < 60 ? "hace " + min + " min" : "hace " + Math.floor(min / 60) + " h " + (min % 60) + " min");
     }
     pinta(); setInterval(pinta, 30000);
   })();
