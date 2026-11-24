@@ -1,2 +1,6 @@
-old/
-gap/
+__pycache__/
+*.pyc
+prueba.csv
+demo_snapshots.csv
+demo_tickers.txt
+/options_snapshots.csv

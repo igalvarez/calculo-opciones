@@ -1,0 +1,51 @@
+# Guardar en el repo como:  .github/workflows/report.yml
+name: report
+
+on:
+  schedule:
+    # 21:23 UTC: despues del cierre en verano (20:00 UTC) y en invierno (21:00 UTC), lunes a viernes
+    - cron: "23 21 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Generar informe
+        run: |
+          if [ -f data/options_snapshots.csv ]; then
+            python opciones_baseline.py report --tickers tickers.txt --csv data/options_snapshots.csv > data/baseline_resumen.txt
+            python opciones_baseline.py report --tickers tickers.txt --csv data/options_snapshots.csv --by-time > data/baseline_por_franja.txt
+          else
+            echo "Aun no hay datos guardados"
+          fi
+
+      - name: Guardar en el repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/baseline_resumen.txt data/baseline_por_franja.txt || true
+          if git diff --cached --quiet; then
+            echo "Sin cambios que guardar"
+          else
+            git commit -m "informe $(date -u +%Y-%m-%d)"
+            git pull --rebase
+            git push
+          fi

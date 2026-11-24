@@ -1,0 +1,32 @@
+# Tus tickers (uno por linea). Rango de prima opcional por ticker: SIMBOLO prima_min prima_max
+# Si no pones rango, se usa el de --prem-min / --prem-max (por defecto 0,30 - 0,60)
+SPY
+QQQ
+IWM
+DIA
+SOXL
+TSLA
+AMZN
+NVDA
+AVGO
+MU
+AMD
+MSFT
+PLTR
+ORCL
+GOOG
+META
+NFLX
+AAPL
+GS
+CAT
+WMT
+LOW
+HD
+UBER
+LYFT
+DASH
+NOW
+IBM
+COIN
+BABA
