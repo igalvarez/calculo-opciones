@@ -1,1 +1,99 @@
-<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta http-equiv='refresh' content='300'><title>Opciones</title><body style='font-family:sans-serif;padding:24px'><h1>Opciones: estado ahora</h1><p>Aun no hay datos guardados. La primera foto se guarda cuando el mercado esta abierto.</p></body>
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="300">
+<title>Opciones: estado ahora</title>
+<style>
+:root{--bg:#ffffff;--fg:#1f2328;--muted:#656d76;--card:#f6f8fa;--line:#d0d7de;
+--ok-bg:#dafbe1;--ok-fg:#116329;--bad-bg:#ffebe9;--bad-fg:#a40e26;--na-bg:#eaeef2;--na-fg:#57606a;--warn-bg:#fff8c5;--warn-fg:#7d4e00}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#8d96a0;--card:#161b22;--line:#30363d;
+--ok-bg:#12261e;--ok-fg:#56d364;--bad-bg:#2d1214;--bad-fg:#ff7b72;--na-bg:#21262d;--na-fg:#8d96a0;--warn-bg:#3b2e00;--warn-fg:#e3b341}}
+*{box-sizing:border-box}
+body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:980px;margin:0 auto}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 12px}
+.counts{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.chip{padding:6px 12px;border-radius:999px;font-weight:600}
+.chip.bad{background:var(--bad-bg);color:var(--bad-fg)}
+.chip.ok{background:var(--ok-bg);color:var(--ok-fg)}
+.chip.na{background:var(--na-bg);color:var(--na-fg)}
+#stale{display:none;background:var(--warn-bg);color:var(--warn-fg);padding:10px 12px;border-radius:8px;margin:8px 0}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:640px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{background:var(--card);font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+td.tk{font-weight:700}
+td.muted{color:var(--muted)}
+td.why{white-space:normal;min-width:180px}
+tr.bad{box-shadow:inset 4px 0 0 var(--bad-fg);background:var(--bad-bg)}
+tr.ok{box-shadow:inset 4px 0 0 var(--ok-fg);background:rgba(46,160,67,.10)}
+tr.na{box-shadow:inset 4px 0 0 var(--line)}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-weight:700;font-size:13px}
+.pill.bad{background:var(--bad-fg);color:var(--bg)}
+.pill.ok{background:var(--ok-bg);color:var(--ok-fg)}
+.pill.na{background:var(--na-bg);color:var(--na-fg)}
+.legend{color:var(--muted);font-size:13px;margin-top:14px}
+.legend b{color:var(--fg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Opciones: estado ahora</h1>
+<p class="sub">Última foto: <b>24/11/2026 11:20 ET</b> (17:20 España) · <span id="ago"></span><br>
+0 días de datos · 1 fotos guardadas · datos de Yahoo con unos 15 min de retraso</p>
+<div id="stale">La última foto tiene más de 45 minutos: puede que GitHub haya retrasado la ejecución o que el mercado esté cerrado.</div>
+<div class="counts"><span class="chip bad">3 estresados</span><span class="chip ok">0 OK</span><span class="chip na">27 sin datos suficientes</span></div>
+<div class="scroll"><table>
+<thead><tr><th>Ticker</th><th>Venc.</th><th>Estado</th><th>Strikes<br>ahora / normal</th><th>Spread $<br>ahora / normal</th><th>Normal histórico<br>strikes típ/máx · spread típ/máx</th><th>Motivo</th></tr></thead>
+<tbody>
+<tr class="bad"><td class="tk">DASH</td><td>1-7DTE</td><td><span class="pill bad">ESTRESADO (sin contrato en rango)</span></td><td>-</td><td>-</td><td class="muted">-</td><td class="why muted">ninguna prima dentro de tu rango</td></tr>
+<tr class="bad"><td class="tk">LYFT</td><td>1-7DTE</td><td><span class="pill bad">ESTRESADO (sin contrato en rango)</span></td><td>-</td><td>-</td><td class="muted">-</td><td class="why muted">ninguna prima dentro de tu rango</td></tr>
+<tr class="bad"><td class="tk">SOXL</td><td>1-7DTE</td><td><span class="pill bad">ESTRESADO (sin contrato en rango)</span></td><td>-</td><td>-</td><td class="muted">-</td><td class="why muted">ninguna prima dentro de tu rango</td></tr>
+<tr class="na"><td class="tk">SPY</td><td>0DTE</td><td><span class="pill na">sin baseline</span></td><td>7 / -</td><td>1,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">QQQ</td><td>0DTE</td><td><span class="pill na">sin baseline</span></td><td>10 / -</td><td>1,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">IWM</td><td>0DTE</td><td><span class="pill na">sin baseline</span></td><td>1 / -</td><td>1,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">DIA</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>11 / -</td><td>14,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">TSLA</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>9 / -</td><td>2,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">AMZN</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>3 / -</td><td>1,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">NVDA</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>5 / -</td><td>1,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">AVGO</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>10 / -</td><td>2,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">MU</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>40 / -</td><td>5,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">AMD</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>25 / -</td><td>11,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">MSFT</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>7 / -</td><td>6,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">PLTR</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>5 / -</td><td>1,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">ORCL</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>10 / -</td><td>8,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">GOOG</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>6 / -</td><td>1,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">META</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>12 / -</td><td>3,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">NFLX</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>1 / -</td><td>1,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">AAPL</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>3 / -</td><td>2,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">GS</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>11 / -</td><td>22,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">CAT</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>20 / -</td><td>30,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">WMT</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>2 / -</td><td>2,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">LOW</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>3 / -</td><td>65,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">HD</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>4 / -</td><td>24,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">UBER</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>1 / -</td><td>7,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">NOW</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>5 / -</td><td>8,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">IBM</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>4 / -</td><td>25,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">COIN</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>9 / -</td><td>11,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+<tr class="na"><td class="tk">BABA</td><td>1-7DTE</td><td><span class="pill na">sin baseline</span></td><td>4 / -</td><td>5,0 / -</td><td class="muted">-</td><td class="why muted">faltan datos guardados</td></tr>
+</tbody></table></div>
+<p class="legend"><b>OK</b> (verde): strikes y spread dentro de lo normal. <b>ESTRESADO</b> (rojo): tu contrato está al menos 2 strikes más lejos del ATM de lo típico y por encima del tope normal, o el spread es más ancho de lo normal. <b>Gris</b>: faltan datos o no suele haber contrato en tu rango. Strikes: 0 = ATM, 1 = el contiguo. Spread en $ por contrato. Normal = misma franja horaria.</p>
+</div>
+<script>
+(function(){
+  var t=new Date("2026-11-24T16:20:05Z");
+  function upd(){
+    var m=Math.round((Date.now()-t.getTime())/60000);
+    var txt=m<1?"hace menos de 1 min":(m<90?"hace "+m+" min":"hace "+(Math.round(m/6)/10)+" h");
+    document.getElementById("ago").textContent=txt;
+    document.getElementById("stale").style.display=(m>45)?"block":"none";
+  }
+  upd(); setInterval(upd,30000);
+})();
+</script>
+</body>
+</html>
