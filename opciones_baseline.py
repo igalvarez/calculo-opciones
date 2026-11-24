@@ -485,13 +485,15 @@ def evaluate(rows, df, now, args):
             if len(ref) < args.min_n:
                 ref = allb
             usual = 100 * float(ref["in_range"].mean()) if len(ref) else float("nan")
-            if len(ref) >= 5 and usual < 80:
+            if len(ref) < 5:
+                # sin historial suficiente no se puede decir que sea anormal
+                rec.update({"estado": "sin baseline", "motivo": "faltan datos guardados"})
+            elif usual < 80:
                 rec.update({"estado": "sin contrato en rango (habitual)",
                             "motivo": f"normalmente solo hay contrato en rango en el {fmt(usual, 0)}% de las fotos"})
             else:
                 rec.update({"estado": "SIN CONTRATO EN RANGO",
-                            "motivo": "ninguna prima dentro de tu rango"
-                                      + (f" (normalmente si hay, {fmt(usual, 0)}% de las fotos)" if len(ref) else "")})
+                            "motivo": f"ninguna prima dentro de tu rango (normalmente si hay, {fmt(usual, 0)}% de las fotos)"})
             out.append(rec)
             continue
         cur_k, cur_s = float(r["tgt_dist_steps"]), float(r["tgt_spread"]) * 100
