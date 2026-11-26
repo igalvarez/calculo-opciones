@@ -216,13 +216,12 @@ def market_open(now):
 DATA_START_MIN = 9 * 60 + 45
 
 
-def data_open(now, start=DATA_START_MIN, delayed=True):
-    """start/delayed: con IBKR (tiempo real) se puede empezar a las 9:30 y parar al cierre exacto."""
+def data_open(now):
     end = session_end(now.date())
     if end is None:
         return False
-    last = (end if end >= CLOSE_MIN else end + 30) if delayed else end   # media sesion Yahoo: hasta ~13:30
-    return start <= minutes_since_midnight(now) < last
+    last = end if end >= CLOSE_MIN else end + 30      # media sesion: datos validos hasta ~13:30
+    return DATA_START_MIN <= minutes_since_midnight(now) < last
 
 
 # ----------------------------------------------------------------------------------------
@@ -269,105 +268,6 @@ class YahooProvider:
         calls = ch.calls[cols].rename(columns={"impliedVolatility": "iv"})
         puts = ch.puts[cols].rename(columns={"impliedVolatility": "iv"})
         return calls, puts
-
-
-class IBKRProvider:
-    """Datos en TIEMPO REAL de Interactive Brokers via IB Gateway / TWS (libreria ib_async).
-    Solo LEE datos de mercado; no envia ordenes. Requiere Gateway abierto y la API activada.
-    Puertos: Gateway 4001 real / 4002 paper; TWS 7496 real / 7497 paper."""
-    realtime = True
-
-    def __init__(self, host="127.0.0.1", port=4001, client_id=17, strikes=15, wait=4.0):
-        try:
-            from ib_async import IB
-        except ImportError:
-            sys.exit("Falta ib_async:  pip install ib_async")
-        import ib_async
-        self.ib_async = ib_async
-        self.n_strikes, self.wait = strikes, wait
-        self.ib = IB()
-        try:
-            self.ib.connect(host, port, clientId=client_id, timeout=15, readonly=True)
-        except Exception as e:
-            sys.exit(f"No puedo conectar con IB Gateway en {host}:{port} ({type(e).__name__}: {e}).\n"
-                     "Revisa que este abierto, el puerto (Configure > Settings > API) y que no haya otro clientId igual.")
-        self.ib.reqMarketDataType(1)             # 1 = tiempo real (sin suscripcion llegaria vacio)
-        self._spot, self._stock = {}, {}
-        print(f"Conectado a IBKR {host}:{port} (solo lectura, tiempo real).")
-
-    def close(self):
-        if self.ib.isConnected():
-            self.ib.disconnect()
-
-    def _wait_for(self, tickers, ready):
-        waited = 0.0
-        while waited < self.wait and not all(ready(t) for t in tickers):
-            self.ib.sleep(0.25)
-            waited += 0.25
-
-    @staticmethod
-    def _pos(x):
-        return float(x) if x is not None and not pd.isna(x) and x > 0 else float("nan")
-
-    def _qualify(self, sym):
-        if sym not in self._stock:
-            st = self.ib_async.Stock(sym, "SMART", "USD")
-            if not self.ib.qualifyContracts(st):
-                raise RuntimeError(f"IBKR no reconoce el ticker {sym}")
-            self._stock[sym] = st
-        return self._stock[sym]
-
-    def spot(self, sym):
-        st = self._qualify(sym)
-        t = self.ib.reqMktData(st, "", False, False)
-        self._wait_for([t], lambda x: not pd.isna(x.marketPrice()))
-        price = t.marketPrice()
-        self.ib.cancelMktData(st)
-        price = float(price) if not pd.isna(price) else None
-        self._spot[sym] = price
-        return price
-
-    def expiries(self, sym):
-        st = self._qualify(sym)
-        chains = self.ib.reqSecDefOptParams(st.symbol, "", st.secType, st.conId)
-        exps = set()
-        for c in chains:
-            if c.exchange == "SMART":
-                exps |= set(c.expirations)
-        return sorted(f"{e[:4]}-{e[4:6]}-{e[6:]}" for e in exps)
-
-    def chain(self, sym, expiry):
-        ia = self.ib_async
-        exp = expiry.replace("-", "")
-        spot = self._spot.get(sym) or self.spot(sym)
-        details = []
-        for right in ("C", "P"):
-            details += self.ib.reqContractDetails(
-                ia.Option(sym, exp, right=right, exchange="SMART", currency="USD"))
-        # un contrato por (strike, lado); si hay varias clases de negociacion, la del propio simbolo
-        con = {}
-        for d in details:
-            c = d.contract
-            key = (c.strike, c.right)
-            if key not in con or c.tradingClass == sym:
-                con[key] = c
-        strikes = sorted({k for k, _ in con})
-        if not strikes:
-            raise RuntimeError(f"sin contratos para {sym} {expiry}")
-        i = min(range(len(strikes)), key=lambda j: abs(strikes[j] - spot))
-        keep = set(strikes[max(0, i - self.n_strikes): i + self.n_strikes + 1])
-        contracts = [c for (k, _), c in con.items() if k in keep]
-        tickers = [self.ib.reqMktData(c, "106", False, False) for c in contracts]   # 106 = IV
-        self._wait_for(tickers, lambda x: not pd.isna(x.bid) and not pd.isna(x.ask) and x.bid != -1)
-        rows = {"C": [], "P": []}
-        for c, t in zip(contracts, tickers):
-            self.ib.cancelMktData(c)
-            iv = t.modelGreeks.impliedVol if t.modelGreeks else (t.impliedVolatility or float("nan"))
-            rows[c.right].append({"strike": float(c.strike), "bid": self._pos(t.bid),
-                                  "ask": self._pos(t.ask), "iv": iv if iv else float("nan")})
-        cols = ["strike", "bid", "ask", "iv"]
-        return (pd.DataFrame(rows["C"], columns=cols).sort_values("strike").reset_index(drop=True),
-                pd.DataFrame(rows["P"], columns=cols).sort_values("strike").reset_index(drop=True))
 
 
 class MockProvider:
@@ -762,8 +662,8 @@ def cmd_check(args, provider):
         wanted = {s.strip().upper() for s in args.only.split(",")}
         tickers = [t for t in tickers if t[0] in wanted]
     now = datetime.now(ET) if not hasattr(provider, "now") else provider.now
-    if not isinstance(provider, MockProvider) and not market_open(now):
-        print("AVISO: mercado cerrado; los bid/ask no son fiables fuera de horario.")
+    if isinstance(provider, YahooProvider) and not market_open(now):
+        print("AVISO: mercado cerrado; los bid/ask de Yahoo no son fiables fuera de horario.")
     rows = snapshot(provider, tickers, now, pause=args.pause, verbose=False)
     if args.save:
         append_csv(args.csv, rows)
@@ -825,7 +725,7 @@ tr.na{box-shadow:inset 4px 0 0 var(--line)}
 <div class="wrap">
 <h1>Opciones: estado ahora</h1>
 <p class="sub">Última foto: <b>%%UPDATED_ET%% ET</b> (%%UPDATED_ES%% España) · <span id="ago"></span><br>
-%%DAYS%% día(s) de datos · %%SNAPS%% fotos guardadas · fuente: %%SOURCE%%</p>
+%%DAYS%% día(s) de datos · %%SNAPS%% fotos guardadas · datos de Yahoo con unos 15 min de retraso</p>
 <div id="stale">La última foto tiene más de 45 minutos: puede que GitHub haya retrasado la ejecución o que el mercado esté cerrado.</div>
 %%NOTE%%
 <div class="counts">%%COUNTS%%</div>
@@ -935,8 +835,6 @@ def cmd_html(args):
             .replace("%%UPDATED_ES%%", et_dt.astimezone(ZoneInfo("Europe/Madrid")).strftime("%H:%M"))
             .replace("%%ISO%%", et_dt.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ"))
             .replace("%%DAYS%%", str(df["ts"].dt.date.nunique()))
-            .replace("%%SOURCE%%", "IBKR en tiempo real" if args.provider == "ibkr"
-                     else "Yahoo con unos 15 min de retraso")
             .replace("%%NOTE%%", note)
             .replace("%%SNAPS%%", str(df["ts"].nunique()))
             .replace("%%COUNTS%%", counts)
@@ -947,18 +845,16 @@ def cmd_html(args):
 
 def cmd_collect(args, provider):
     tickers, _missing, _dates = resolve_tickers(args.tickers, args.prem_min, args.prem_max, args.rp)
-    rt = getattr(provider, "realtime", False)
-    start = OPEN_MIN if rt else DATA_START_MIN           # IBKR: sin retraso, desde las 9:30
     while True:
         now = datetime.now(ET)
-        if not data_open(now, start, delayed=not rt) and not args.force:
-            if args.loop and now.weekday() < 5 and minutes_since_midnight(now) < start:
-                wait = (start - minutes_since_midnight(now)) * 60
-                print(f"Todavia no hay datos fiables. Espero {wait // 60} min hasta las {start // 60}:{start % 60:02d} ET...")
+        if not data_open(now) and not args.force:
+            if args.loop and now.weekday() < 5 and minutes_since_midnight(now) < DATA_START_MIN:
+                wait = (DATA_START_MIN - minutes_since_midnight(now)) * 60
+                print(f"Todavia no hay datos fiables (Yahoo va con retraso). Espero {wait // 60} min hasta las 9:45 ET...")
                 time.sleep(wait)
                 continue
-            print(f"[{now.strftime('%H:%M')} ET] Fuera de horario de datos fiables ({start // 60}:{start % 60:02d}-16:00 ET "
-                  "en dias habiles; festivos y medias sesiones aparte): no se guarda nada. Usa --force para guardar igualmente.")
+            print(f"[{now.strftime('%H:%M')} ET] Fuera de horario de datos fiables (9:45-16:00 ET en dias habiles; "
+                  "festivos y medias sesiones aparte): no se guarda nada. Usa --force para guardar igualmente.")
             return
         if now.year > CALENDAR_LAST_YEAR:
             print(f"AVISO: el calendario de festivos del script solo esta completo hasta {CALENDAR_LAST_YEAR}; revisalo.")
@@ -1009,17 +905,10 @@ def main():
     def common(p):
         p.add_argument("--tickers", default="tickers.txt")
         p.add_argument("--rp", default="rp.xls", help="Excel de rangos de la academia (fuente de verdad de los rangos)")
-        p.add_argument("--csv", default=None,
-                       help="CSV de fotos (def: options_snapshots.csv; con --provider ibkr: options_snapshots_ibkr.csv, "
-                            "para no mezclar datos de Yahoo e IBKR en el mismo baseline)")
+        p.add_argument("--csv", default="options_snapshots.csv")
         p.add_argument("--prem-min", type=num, default=0.30, help="prima minima de tu contrato (def 0,30)")
         p.add_argument("--prem-max", type=num, default=0.60, help="prima maxima de tu contrato (def 0,60)")
-        p.add_argument("--provider", choices=["yahoo", "ibkr", "mock"], default="yahoo")
-        p.add_argument("--ib-host", default="127.0.0.1")
-        p.add_argument("--ib-port", type=int, default=4001, help="Gateway 4001 real / 4002 paper; TWS 7496 / 7497")
-        p.add_argument("--ib-client-id", type=int, default=17)
-        p.add_argument("--ib-strikes", type=int, default=15,
-                       help="strikes a cada lado del ATM que se piden a IBKR (cada uno = 1 linea de datos; limite ~100)")
+        p.add_argument("--provider", choices=["yahoo", "mock"], default="yahoo")
         p.add_argument("--bucket-minutes", type=int, default=30)
         p.add_argument("--pause", type=float, default=0.7, help="segundos entre tickers")
 
@@ -1059,28 +948,17 @@ def main():
     d.add_argument("--min-days", type=int, default=3)
 
     args = ap.parse_args()
-    if args.csv is None:
-        args.csv = "options_snapshots_ibkr.csv" if args.provider == "ibkr" else "options_snapshots.csv"
     if args.cmd == "demo":
         return cmd_demo(args)
     if args.cmd == "report":                    # el informe solo lee el CSV: no necesita internet
         return cmd_report(args)
     if args.cmd == "html":
         return cmd_html(args)
-    if args.provider == "mock":
-        provider = MockProvider()
-    elif args.provider == "ibkr":
-        provider = IBKRProvider(args.ib_host, args.ib_port, args.ib_client_id, args.ib_strikes)
-    else:
-        provider = YahooProvider()
-    try:
-        if args.cmd == "collect":
-            cmd_collect(args, provider)
-        elif args.cmd == "check":
-            cmd_check(args, provider)
-    finally:
-        if hasattr(provider, "close"):
-            provider.close()
+    provider = MockProvider() if args.provider == "mock" else YahooProvider()
+    if args.cmd == "collect":
+        cmd_collect(args, provider)
+    elif args.cmd == "check":
+        cmd_check(args, provider)
 
 
 if __name__ == "__main__":
