@@ -283,6 +283,11 @@ CSS = (
     ".bx b{font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
     ".bx.p{background:var(--pb);border-color:var(--p)}.bx.p b{color:var(--p)}.bx.n{background:var(--nb);border-color:var(--n)}.bx.n b{color:var(--n)}.bx.w{background:var(--wb);border-color:var(--w)}"
     ".rl{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}"
+    # Tarjetas de earnings mas compactas (solo la seccion «Earnings de ayer y hoy»)
+    ".gc:has(.em){grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:5px}"
+    ".em{padding:4px 7px}.em .tk{font-size:13px}.em .nm{font-size:10.5px}.em .cp{font-size:10px}.em .ch{font-size:9.5px;padding:0 5px}"
+    ".em .du{gap:4px;margin-top:3px}.em .bx{padding:2px 5px;border-radius:6px}.em .bx b{font-size:11.5px}.em .lb{font-size:9.5px}"
+    ".em .rl{margin-top:3px;gap:3px}.em .et{font-size:10px;padding:0 5px}"
     ".dy{background:var(--ab);color:var(--a);font-size:11.5px;font-weight:600;padding:2px 9px}"
     ".ev,.pe,.sp{display:grid;gap:6px;align-items:baseline;padding:4px 9px;border-bottom:1px solid var(--b);font-size:12.5px}"
     ".ev{grid-template-columns:52px 1fr auto}.ev.r{background:var(--nb)}.ev.y{background:var(--wb)}"
