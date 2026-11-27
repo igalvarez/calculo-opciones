@@ -6,3 +6,4 @@ beautifulsoup4
 yfinance
 pandas
 tzdata
+deep-translator

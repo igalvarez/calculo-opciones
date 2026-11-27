@@ -110,6 +110,59 @@ def lista(filas_html):
     return f'<div class="ls">{"".join(filas_html)}</div>'
 
 
+# ── Traduccion de titulares ─────────────────────────────────────────────────────────────────────
+# get-info.py ya intenta traducir con MyMemory, pero desde GitHub (IP compartida) se queda sin cuota y deja el titular
+# en ingles. Aqui se repasa: lo que siga en ingles se traduce con Google Translate (deep-translator, sin key) y se
+# guarda en una cache para no volver a pedirlo en cada publicacion.
+_CACHE_TR = {}
+_CACHE_TR_RUTA = None
+
+
+def _cargar_cache_tr(carpeta):
+    global _CACHE_TR, _CACHE_TR_RUTA
+    _CACHE_TR_RUTA = os.path.join(carpeta, "traducciones.json")
+    try:
+        with open(_CACHE_TR_RUTA, encoding="utf-8") as f:
+            _CACHE_TR = json.load(f)
+    except Exception:
+        _CACHE_TR = {}
+
+
+def _guardar_cache_tr():
+    if _CACHE_TR_RUTA and _CACHE_TR:
+        try:
+            os.makedirs(os.path.dirname(_CACHE_TR_RUTA), exist_ok=True)
+            with open(_CACHE_TR_RUTA, "w", encoding="utf-8") as f:
+                json.dump(dict(list(_CACHE_TR.items())[-400:]), f, ensure_ascii=False, indent=0)
+        except Exception:
+            pass
+
+
+_PALABRAS_EN = re.compile(r"(the|and|of|to|in|for|on|as|with|after|says|will|stocks?|shares|market|fed|says|as|its|new|amid|over)", re.I)
+_PALABRAS_ES = re.compile(r"(el|la|los|las|de|del|que|en|para|con|por|tras|una?|se|sus|más)", re.I)
+
+
+def parece_ingles(t):
+    return len(_PALABRAS_EN.findall(t)) > len(_PALABRAS_ES.findall(t))
+
+
+def traducir(t):
+    """Devuelve t en español; si no se puede traducir, devuelve t tal cual."""
+    if not t or not parece_ingles(t):
+        return t
+    if t in _CACHE_TR:
+        return _CACHE_TR[t]
+    try:
+        from deep_translator import GoogleTranslator
+        r = GoogleTranslator(source="en", target="es").translate(t)
+    except Exception:
+        return t
+    if r and r.strip() and r.strip().lower() != t.strip().lower():
+        _CACHE_TR[t] = r.strip()
+        return _CACHE_TR[t]
+    return t
+
+
 # ── Secciones ───────────────────────────────────────────────────────────────────────────────────
 _CORTO = {"S&P 500": "S&P 500", "NASDAQ 100": "Nasdaq 100", "RUSSELL 2000": "Russell 2000", "DOW": "Dow"}
 
@@ -140,7 +193,7 @@ def h_noticias(D):
         meta = f'{esc(n["hora"])} ET {chip(n["tag"], _TAG.get(n["tag"], ""))}'
         if n.get("n", 1) > 1:
             meta += f' {chip(str(n["n"]) + " fuentes", "p")}'
-        txt = esc(n["texto"])
+        txt = esc(n["texto"] if n.get("tag") in ("8-K", "FED") else traducir(n["texto"]))
         if n.get("link"):
             txt = f'<a href="{esc(n["link"])}" target="_blank" rel="noopener">{txt}</a>'
         filas.append(f'<div class="nw"><div class="mm">{meta}</div><div>{txt} <span class="fu">{esc(", ".join(fuentes))}</span></div></div>')
@@ -156,29 +209,26 @@ def h_earnings(D):
     if not E["filas"]:
         return sec(t, vacio("Ninguna de las grandes (ni el top 10 por capitalización) reportó ayer tras el cierre ni reporta hoy antes de abrir."))
     etf = "".join(f'<span class="et {sg(p)}">{esc(e)} <b>{pct(p)}</b></span>' for e, p in E["etf"])
-    cards = []
+    filas = []
     for f in E["filas"]:
         v, r = f["resultado"], f["reaccion"]
         if v:
-            sub = (pct(v["pct"], 0) + " vs cons.") if v["pct"] is not None else "cons. 0"
-            res = f'<div class="bx {sg(v["dif"], 0.005)}"><span class="lb">Resultado</span><b>EPS {num(v["eps"])} vs {num(v["cons"])}</b><span class="lb">{esc(sub)}{" ~" if v["fuente"] == "calendario" else ""}</span></div>'
+            sub = f' ({pct(v["pct"], 0)})' if v["pct"] is not None else ""
+            res = f'<span class="rs {sg(v["dif"], 0.005)}">EPS <b>{num(v["eps"])}</b> vs {num(v["cons"])}{esc(sub)}{" ~" if v["fuente"] == "calendario" else ""}</span>'
         else:
-            res = '<div class="bx g"><span class="lb">Resultado</span><b>pendiente</b><span class="lb">sin dato aún</span></div>'
+            res = '<span class="rs g">EPS pendiente</span>'
         if r:
-            et = {"after-hours": "after-hours", "premarket": "premarket", "regular": "sesión"}.get(r["fuente"], r["fuente"])
-            rea = f'<div class="bx {sg(r["pct"])}"><span class="lb">Reacción</span><b>{pct(r["pct"])}</b><span class="lb">{esc(et)} {esc(r["hora"])}</span></div>'
+            et = {"after-hours": "AH", "premarket": "PM", "regular": "sesión"}.get(r["fuente"], r["fuente"])
+            rea = f'<span class="rs {sg(r["pct"])}"><b>{pct(r["pct"])}</b> <i>{esc(et)} {esc(r["hora"])}</i></span>'
         else:
-            rea = '<div class="bx g"><span class="lb">Reacción</span><b>n/d</b><span class="lb">sin precio</span></div>'
-        rel = ""
-        if f["etfs"]:
-            rel = '<div class="rl">' + "".join(f'<span class="et {sg(p)}">{esc(e)} <b>{pct(p)}</b></span>' for e, p in f["etfs"]) + "</div>"
-        top = chip("★ top 10") if f["extra"] else ""
-        cards.append(
-            f'<article class="cd em"><div class="hd"><b class="tk">{esc(f["sym"])}</b><span class="nm">{esc(f["nombre"])}</span>'
-            f'{chip(f["tag"], "w")}{top}<span class="cp">{cap_txt(f["cap"])}</span></div>'
-            f'<div class="du">{res}{rea}</div>{rel}</article>')
+            rea = '<span class="rs g">sin precio</span>'
+        rel = "".join(f'<span class="et {sg(p)}">{esc(e)} <b>{pct(p)}</b></span>' for e, p in f["etfs"])
+        top = chip("★") if f["extra"] else ""
+        filas.append(
+            f'<div class="er"><b class="tk">{esc(f["sym"])}</b>{chip(f["tag"], "w")}{top}'
+            f'<span class="nm">{esc(f["nombre"])}</span>{res}{rea}{rel}<span class="cp">{cap_txt(f["cap"])}</span></div>')
     nota = "Resultado: EPS vs consenso. Reacción: precio ahora vs cierre de ayer. «~»: cifra del calendario del Nasdaq (puede mezclar EPS GAAP y ajustado). Cap. en miles de millones de $."
-    return sec(t, f'<div class="etr"><span class="lb">ETF</span>{etf}</div><div class="gc">{"".join(cards)}</div>', nota)
+    return sec(t, f'<div class="etr"><span class="lb">ETF</span>{etf}</div>{lista(filas)}', nota)
 
 
 def _por_dias(filas, fila_html):
@@ -283,11 +333,11 @@ CSS = (
     ".bx b{font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
     ".bx.p{background:var(--pb);border-color:var(--p)}.bx.p b{color:var(--p)}.bx.n{background:var(--nb);border-color:var(--n)}.bx.n b{color:var(--n)}.bx.w{background:var(--wb);border-color:var(--w)}"
     ".rl{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}"
-    # Tarjetas de earnings mas compactas (solo la seccion «Earnings de ayer y hoy»)
-    ".gc:has(.em){grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:5px}"
-    ".em{padding:4px 7px}.em .tk{font-size:13px}.em .nm{font-size:10.5px}.em .cp{font-size:10px}.em .ch{font-size:9.5px;padding:0 5px}"
-    ".em .du{gap:4px;margin-top:3px}.em .bx{padding:2px 5px;border-radius:6px}.em .bx b{font-size:11.5px}.em .lb{font-size:9.5px}"
-    ".em .rl{margin-top:3px;gap:3px}.em .et{font-size:10px;padding:0 5px}"
+    # Earnings: una linea por empresa
+    ".er{display:flex;flex-wrap:wrap;align-items:center;gap:2px 7px;padding:3px 9px;border-bottom:1px solid var(--b);font-size:12px}.er:last-child{border-bottom:0}"
+    ".er .tk{font-size:13px}.er .nm{flex:1 1 90px;max-width:170px;font-size:11px}.er .cp{margin-left:auto}"
+    ".rs{white-space:nowrap;color:var(--m)}.rs b{font-variant-numeric:tabular-nums}.rs i{font-style:normal;font-size:10.5px}"
+    ".rs.p,.rs.p b{color:var(--p)}.rs.n,.rs.n b{color:var(--n)}.rs.w{color:var(--w)}.er .et{font-size:10.5px}"
     ".dy{background:var(--ab);color:var(--a);font-size:11.5px;font-weight:600;padding:2px 9px}"
     ".ev,.pe,.sp{display:grid;gap:6px;align-items:baseline;padding:4px 9px;border-bottom:1px solid var(--b);font-size:12.5px}"
     ".ev{grid-template-columns:52px 1fr auto}.ev.r{background:var(--nb)}.ev.y{background:var(--wb)}"
@@ -379,6 +429,7 @@ def main():
             return salir(False, f"La franja {franja} de hoy ya esta publicada; no se repite")
     franja = franja or "manual"
 
+    _cargar_cache_tr(a.salida)
     try:
         D = gi.reunir_premarket()
         cuerpo = "".join([h_futuros(D), h_noticias(D), h_earnings(D), h_agenda(D), h_proximos(D), h_splits(D)])
@@ -386,6 +437,7 @@ def main():
         sys.stderr.write(traceback.format_exc())
         return salir(False, "ERROR generando el resumen; la pagina anterior se mantiene", codigo=1)
 
+    _guardar_cache_tr()
     utc = ahora.astimezone(datetime.timezone.utc)
     fecha = f"{DIAS_LARGO[ahora.weekday()]} {ahora.day} de {MESES_LARGO[ahora.month - 1]} de {ahora.year}"
     actualizado = f"{ahora:%H:%M} ET"
