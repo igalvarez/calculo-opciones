@@ -1,48 +1,64 @@
 
-VALORES NORMALES (2 dias de datos)
+VALORES NORMALES (3 dias de datos)
   strikes = cuantos contratos (strikes) hay desde el ATM hasta tu contrato. 1 = el contiguo al ATM
   spread$ = ancho bid-ask de ese contrato, en $ por contrato
   tipico = lo habitual (mediana) | max = tope de lo normal (el 90% de las veces esta por debajo)
 
 ticker   venc strikes normal (tipico / max) spread$ normal (tipico / max)  fotos
-   SPY   0DTE                      7 / 13,7                     1,0 / 1,0     27
-   QQQ   0DTE                      7 / 14,8                     1,0 / 1,0     27
-   IWM   0DTE                       0 / 2,6                     1,0 / 1,0     27
+   SPY   0DTE                        6 / 12                     1,0 / 1,0     42
+   QQQ   0DTE                      6 / 13,2                     1,0 / 1,0     42
+   IWM   0DTE                         0 / 2                     1,0 / 2,0     42
+   DIA   0DTE                         0 / 0                   24,5 / 31,9     15
    DIA 1-7DTE                         5 / 7                   27,0 / 35,0     27
+  SOXL   0DTE                         0 / 0                    3,0 / 79,0     15
   SOXL 1-7DTE                         1 / 2                    8,0 / 20,0     27
-  TSLA   0DTE                         1 / 2                     3,5 / 6,7     18
+  TSLA   0DTE                         0 / 2                     4,0 / 6,4     33
   TSLA 1-7DTE                         3 / 4                     4,5 / 6,0      9
-  AMZN   0DTE                         0 / 1                    6,0 / 10,3     18
+  AMZN   0DTE                         0 / 1                    6,0 / 10,0     33
   AMZN 1-7DTE                         1 / 1                    7,5 / 11,3      9
-  NVDA   0DTE                         0 / 2                     2,0 / 3,0     18
+  NVDA   0DTE                         0 / 2                     2,0 / 3,0     33
   NVDA 1-7DTE                         3 / 3                     1,0 / 2,0      9
-  AVGO   0DTE                         1 / 3                   10,0 / 13,0     18
+  AVGO   0DTE                         1 / 3                    9,0 / 13,0     33
   AVGO 1-7DTE                       6,5 / 7                     4,0 / 5,3      9
-    MU   0DTE                         2 / 6                   15,0 / 25,0     18
+    MU   0DTE                       2 / 5,2                   20,0 / 31,0     33
     MU 1-7DTE                       13 / 14                   22,5 / 40,0      9
-   AMD   0DTE                         3 / 7                   11,0 / 15,0     18
+   AMD   0DTE                         2 / 6                   11,0 / 15,8     33
    AMD 1-7DTE                     13 / 14,6                   10,0 / 12,3      9
-  MSFT   0DTE                         2 / 4                    8,0 / 11,0     18
+  MSFT   0DTE                       1 / 3,7                    7,0 / 10,7     33
   MSFT 1-7DTE                         5 / 6                    7,5 / 10,6      9
+  PLTR   0DTE                         0 / 0                   14,0 / 19,8     15
   PLTR 1-7DTE                         1 / 1                    8,0 / 12,7     27
+  ORCL   0DTE                         0 / 1                   11,0 / 16,6     15
   ORCL 1-7DTE                         4 / 5                    8,0 / 13,7     27
+  GOOG   0DTE                         0 / 1                    7,5 / 13,3     15
   GOOG 1-7DTE                         3 / 4                   12,0 / 16,0     27
-  META   0DTE                       2 / 5,4                   12,0 / 17,4     18
+  META   0DTE                       1,5 / 5                   11,0 / 17,0     33
   META 1-7DTE                         7 / 8                     8,0 / 9,3      9
+  NFLX   0DTE                         0 / 0                    3,0 / 10,4     15
   NFLX 1-7DTE                         0 / 1                     3,0 / 5,1     27
-  AAPL   0DTE                         1 / 2                     2,0 / 4,0     18
+  AAPL   0DTE                       0,5 / 2                     2,0 / 4,9     33
   AAPL 1-7DTE                         2 / 2                     3,0 / 4,0      9
     GS 1-7DTE                       18 / 19                   60,0 / 85,0      6
    CAT 1-7DTE                     21,5 / 24                  94,5 / 108,0      6
+   WMT   0DTE                         0 / 0                   25,0 / 25,0     15
    WMT 1-7DTE                         0 / 1                    6,0 / 10,0     27
+   LOW   0DTE                         0 / 0                 192,5 / 275,0     15
    LOW 1-7DTE                         1 / 2                  65,0 / 195,0     27
+    HD   0DTE                         0 / 0                   69,0 / 74,2     15
     HD 1-7DTE                         1 / 2                   23,0 / 51,4     27
+  UBER   0DTE                         0 / 0                    8,0 / 15,5     15
   UBER 1-7DTE                         1 / 1                    7,0 / 10,0     27
+  LYFT   0DTE                             -                             -     15
   LYFT 1-7DTE                         0 / 0                    9,0 / 24,3     27
+  DASH   0DTE                         0 / 0                 133,0 / 133,0     15
   DASH 1-7DTE                         1 / 1                  75,0 / 138,2     27
+   NOW   0DTE                         0 / 0                    8,0 / 18,1     15
    NOW 1-7DTE                         2 / 3                     8,0 / 9,0     27
+   IBM   0DTE                         0 / 0                   63,5 / 78,5     15
    IBM 1-7DTE                         1 / 2                   36,0 / 70,9     27
+  COIN   0DTE                             -                             -     15
   COIN 1-7DTE                         0 / 1                   18,0 / 28,0     27
+  BABA   0DTE                         0 / 0                     8,0 / 9,0     15
   BABA 1-7DTE                         3 / 5                    9,0 / 14,0     27
 
-AVISO: solo 2 dias de datos; con 5 o mas el baseline es mas fiable (mejor 10-20).
+AVISO: solo 3 dias de datos; con 5 o mas el baseline es mas fiable (mejor 10-20).
